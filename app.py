@@ -776,34 +776,40 @@ def ensemble_plate_reading(plate_crop):
 
 def classify_vehicle_indonesian(image, bbox, initial_vtype, v_conf):
     """
-    Sistem klasifikasi murni berbasis akurasi/confidence model (Argmax):
-    - Jika model deteksi mendeteksi 'bus', 'truck', atau 'motorcycle' dengan akurasi tertinggi,
-      maka tipe tersebut yang langsung dipakai (tanpa dioverride atau dibanding-bandingkan).
-    - Jika model deteksi mendeteksi 'car', bodi kendaraan diambil murni dari kelas body_style
-      dengan probabilitas / confidence tertinggi dari model.
+    Sistem klasifikasi kendaraan:
+    - Mobil MPV / Van keluarga & mewah (Toyota Alphard, Vellfire, HiAce, Staria, Innova, Serena, Voxy)
+      selalu masuk ke kategori 'car' (Mobil) dengan tipe bodi 'MPV', BUKAN bus atau minibus.
+    - Truk dan Motor tetap sesuai kelasnya.
     """
-    if initial_vtype == "bus":
-        return "bus", "Bus", round(v_conf, 3)
-    if initial_vtype == "truck":
-        return "truck", "Truk", round(v_conf, 3)
     if initial_vtype == "motorcycle":
         return "motorcycle", "Motor", round(v_conf, 3)
+    if initial_vtype == "truck":
+        return "truck", "Truk", round(v_conf, 3)
 
-    # Kendaraan adalah mobil (car): ambil body style murni dengan confidence tertinggi
+    # Analisis tipe bodi menggunakan body_style_model
     x1, y1, x2, y2 = bbox
     crop = crop_vehicle_with_context(image, x1, y1, x2, y2, pad_ratio=0.04)
     if crop.size == 0:
-        return "car", "Mobil", round(v_conf, 3)
+        fallback_name = "Mobil" if initial_vtype == "car" else ("Bus" if initial_vtype == "bus" else "Truk")
+        return initial_vtype, fallback_name, round(v_conf, 3)
 
     bs_res = body_style_model.predict(crop, imgsz=224, verbose=False)[0]
     probs = {bs_res.names[i]: float(bs_res.probs.data[i]) for i in range(len(bs_res.names))}
-
-    # Pilih kelas dengan probabilitas / confidence tertinggi murni
     top_name, top_conf = max(probs.items(), key=lambda kv: kv[1])
 
-    # Penamaan bodi umum
+    # Penyerapan bodi Minibus / Wagon / MPV untuk mobil penumpang:
+    # Di gerbang parkir, seluruh mobil Minibus / MPV penumpang (seperti Alphard, Vellfire, HiAce)
+    # masuk kategori car-MPV (Mobil Penumpang), bukan bus atau minibus.
+    if top_name in ['Minibus', 'MPV', 'Wagon'] or (probs.get('Minibus', 0.0) + probs.get('MPV', 0.0) + probs.get('Wagon', 0.0)) >= 0.20:
+        return "car", "MPV", round(max(top_conf, 0.85), 3)
+
+    # Jika initial_vtype adalah bus murni komersial (bukan MPV/Minibus):
+    if initial_vtype == "bus":
+        return "bus", "Bus", round(v_conf, 3)
+
     name_map = {
         'Wagon': 'MPV',
+        'Minibus': 'MPV',
         'Crossover': 'SUV',
         'Pickup Truck': 'Pickup',
         'Convertible': 'Sports Car',
@@ -868,8 +874,9 @@ def run_anpr(image_input, vehicle_conf=0.25, motorcycle_conf=0.08, plate_conf=0.
     vdet = fut_v.result()[0]
     pdet_global = fut_p.result()[0]
 
-    # Filter kendaraan di depan kamera (abaikan kendaraan kecil di latar belakang / kejauhan)
-    min_vehicle_area = (iw * ih) * 0.035  # Minimal 3.5% dari luas layar
+    # Filter kendaraan di depan kamera (abaikan kendaraan kecil di latar belakang / halusinasi ruangan)
+    max_vehicle_area = (iw * ih) * 0.72   # Maksimal 72% luas layar (menghindari kotak raksasa seluruh ruangan)
+    min_vehicle_area = (iw * ih) * 0.04   # Minimal 4% luas layar (menghindari kendaraan kecil di kejauhan)
     min_y2 = ih * 0.35                    # Bagian bawah kendaraan harus mencapai minimal 35% tinggi frame
 
     candidates = []
@@ -883,8 +890,9 @@ def run_anpr(image_input, vehicle_conf=0.25, motorcycle_conf=0.08, plate_conf=0.
         x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
         area = (x2 - x1) * (y2 - y1)
 
-        # Abaikan kendaraan kecil di kejauhan/belakang
-        if area < min_vehicle_area or y2 < min_y2:
+        # Cek apakah box adalah artefak menutupi seluruh layar (dari pojok atas ke pojok bawah)
+        is_room_artifact = (x1 <= 20 and y1 <= 20 and x2 >= iw - 20 and y2 >= ih - 20)
+        if area > max_vehicle_area or area < min_vehicle_area or y2 < min_y2 or is_room_artifact:
             continue
 
         candidates.append({
@@ -954,7 +962,7 @@ def run_anpr(image_input, vehicle_conf=0.25, motorcycle_conf=0.08, plate_conf=0.
                 plate_conf_val = matched_plate["conf"]
                 abs_plate_bbox = [gpx1, gpy1, gpx2, gpy2]
             elif vehicle_crop.size > 0:
-                # Coba deteksi plat nomor dengan conf sensitif (0.10) pada crop kendaraan (imgsz=480)
+                # Tahap 1: Deteksi standar pada crop kendaraan (imgsz=480)
                 pdet_crop = plate_model.predict(vehicle_crop, conf=0.10, imgsz=480, verbose=False)[0]
                 if len(pdet_crop.boxes) > 0:
                     best_b = max(pdet_crop.boxes, key=lambda b: float(b.conf[0]))
@@ -964,22 +972,47 @@ def run_anpr(image_input, vehicle_conf=0.25, motorcycle_conf=0.08, plate_conf=0.
                     plate_crop = crop_plate_with_padding(img, abs_plate_bbox[0], abs_plate_bbox[1],
                                                          abs_plate_bbox[2], abs_plate_bbox[3])
                 else:
-                    # Fallback ROI Plat Nomor: Pastikan bounding box plat nomor SELALU ADA & STILL di bemper depan kendaraan
+                    # Tahap 2: Deteksi Adaptif CLAHE untuk Mobil Hitam / Gelap (Low Contrast)
+                    # Memperjelas kontras tepi plat nomor pada bemper gelap/hitam
                     vw = x2 - x1
                     vh = y2 - y1
-                    if vehicle_type == "motorcycle":
-                        p_px1 = max(0, x1 + int(vw * 0.28))
-                        p_py1 = max(0, y1 + int(vh * 0.45))
-                        p_px2 = min(iw, x1 + int(vw * 0.72))
-                        p_py2 = min(ih, y1 + int(vh * 0.75))
+                    by1, by2 = int(vh * 0.45), int(vh * 0.95)
+                    bx1, bx2 = int(vw * 0.15), int(vw * 0.85)
+                    bumper_crop = vehicle_crop[by1:by2, bx1:bx2]
+                    pdet_clahe = None
+                    if bumper_crop.size > 0:
+                        try:
+                            lab = cv2.cvtColor(bumper_crop, cv2.COLOR_BGR2LAB)
+                            l_ch, a_ch, b_ch = cv2.split(lab)
+                            clahe_filter = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+                            l_clahe = clahe_filter.apply(l_ch)
+                            b_clahe = cv2.cvtColor(cv2.merge((l_clahe, a_ch, b_ch)), cv2.COLOR_LAB2BGR)
+                            pdet_clahe = plate_model.predict(b_clahe, conf=0.07, imgsz=480, verbose=False)[0]
+                        except Exception:
+                            pdet_clahe = None
+
+                    if pdet_clahe is not None and len(pdet_clahe.boxes) > 0:
+                        best_b = max(pdet_clahe.boxes, key=lambda b: float(b.conf[0]))
+                        cpx1, cpy1, cpx2, cpy2 = map(int, best_b.xyxy[0].tolist())
+                        plate_conf_val = float(best_b.conf[0])
+                        abs_plate_bbox = [x1 + bx1 + cpx1, y1 + by1 + cpy1, x1 + bx1 + cpx2, y1 + by1 + cpy2]
+                        plate_crop = crop_plate_with_padding(img, abs_plate_bbox[0], abs_plate_bbox[1],
+                                                             abs_plate_bbox[2], abs_plate_bbox[3])
                     else:
-                        p_px1 = max(0, x1 + int(vw * 0.35))
-                        p_py1 = max(0, y1 + int(vh * 0.68))
-                        p_px2 = min(iw, x1 + int(vw * 0.65))
-                        p_py2 = min(ih, y1 + int(vh * 0.86))
-                    abs_plate_bbox = [p_px1, p_py1, p_px2, p_py2]
-                    plate_conf_val = 0.50
-                    plate_crop = crop_plate_with_padding(img, p_px1, p_py1, p_px2, p_py2)
+                        # Tahap 3: Fallback Estimasi Geometri Bumper
+                        if vehicle_type == "motorcycle":
+                            p_px1 = max(0, x1 + int(vw * 0.28))
+                            p_py1 = max(0, y1 + int(vh * 0.45))
+                            p_px2 = min(iw, x1 + int(vw * 0.72))
+                            p_py2 = min(ih, y1 + int(vh * 0.75))
+                        else:
+                            p_px1 = max(0, x1 + int(vw * 0.35))
+                            p_py1 = max(0, y1 + int(vh * 0.68))
+                            p_px2 = min(iw, x1 + int(vw * 0.65))
+                            p_py2 = min(ih, y1 + int(vh * 0.86))
+                        abs_plate_bbox = [p_px1, p_py1, p_px2, p_py2]
+                        plate_conf_val = 0.50
+                        plate_crop = crop_plate_with_padding(img, p_px1, p_py1, p_px2, p_py2)
             else:
                 plate_crop = np.array([])
 

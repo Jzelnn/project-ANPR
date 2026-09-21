@@ -53,14 +53,10 @@ def save_parking_record(det, source_img=None, source_img_path=None):
     timestamp_str = now.strftime("%Y-%m-%d %H:%M:%S")
     file_ts = now.strftime("%Y%m%d_%H%M%S_%f")[:19]
 
-    plate_text = det.get("license_plate")
-    if not plate_text or not str(plate_text).strip():
-        return None
+    plate_text = det.get("license_plate") or "TIDAK_TERBACA"
     if not isinstance(plate_text, str):
         plate_text = str(plate_text)
-    safe_plate = re.sub(r'[^A-Za-z0-9]', '', plate_text)
-    if not safe_plate:
-        return None
+    safe_plate = re.sub(r'[^A-Za-z0-9]', '', plate_text) or "UNKNOWN"
 
     # Anti-Passback Gate Cooldown: Jika plat yang sama baru tercatat < 3 detik lalu, gunakan record yang ada
     if safe_plate != "UNKNOWN" and safe_plate in LAST_RECORDED_PLATES:
@@ -552,13 +548,6 @@ def refine_indonesian_plate(char_raw, easy_raw="", all_easy_texts=None):
     if not c_clean and not e_clean:
         return ""
 
-    combined_all = c_clean + e_clean + "".join(all_easy_texts)
-
-    # Validasi Plat Dasar: Plat nomor Indonesia WAJIB mengandung angka dan huruf
-    # Jika tidak ada satupun angka asli (misal 'SSS' / 'TETWU') atau tidak ada huruf (misal '5757'), ini noise saat mobil bergerak
-    if not any(c.isdigit() for c in combined_all) or not any(c.isalpha() for c in combined_all):
-        return ""
-
     # Ekstraksi seluruh kandidat suffix dari EasyOCR
     easy_suffixes = []
     for t in all_easy_texts:
@@ -575,7 +564,7 @@ def refine_indonesian_plate(char_raw, easy_raw="", all_easy_texts=None):
 
     # Gunakan char_raw sebagai kerangka utama jika valid, atau fallback ke easy_raw
     has_alpha_and_digit = any(c.isalpha() for c in c_clean) and any(c.isdigit() for c in c_clean)
-    base_text = c_clean if (len(c_clean) >= 4 and has_alpha_and_digit) else (e_clean or c_clean)
+    base_text = c_clean if (len(c_clean) >= 3 or has_alpha_and_digit) else (e_clean or c_clean)
 
     # Parsing struktur plat: Prefix (1-2 huruf), Digits (1-4 angka), Suffix (1-3 huruf)
     first_digit_idx = -1
@@ -592,20 +581,14 @@ def refine_indonesian_plate(char_raw, easy_raw="", all_easy_texts=None):
         digits = base_text[first_digit_idx:last_digit_idx + 1]
         suffix = base_text[last_digit_idx + 1:]
     else:
-        # Pola fallback dengan regex yang mewajibkan digit angka nyata
-        m = re.search(r'([A-Z]{1,2})(\d{1,4})([A-Z]{1,3})?', base_text)
+        # Pola fallback dengan regex
+        m = re.match(r'^([A-Z0-9]{1,2})([0-9A-Z]{1,4})([A-Z0-9]{1,3})$', base_text)
         if m:
-            prefix, digits, suffix = m.group(1), m.group(2), (m.group(3) or "")
+            prefix, digits, suffix = m.group(1), m.group(2), m.group(3)
         else:
-            found = False
-            for t in all_easy_texts:
-                m2 = re.search(r'([A-Z]{1,2})(\d{1,4})([A-Z]{1,3})?', t.upper())
-                if m2:
-                    prefix, digits, suffix = m2.group(1), m2.group(2), (m2.group(3) or "")
-                    found = True
-                    break
-            if not found:
-                return ""
+            prefix = base_text[:1] if len(base_text) > 0 else ""
+            digits = base_text[1:5] if len(base_text) > 1 else ""
+            suffix = base_text[5:] if len(base_text) > 5 else ""
 
     # Jika base_text tidak memiliki suffix tapi EasyOCR mendeteksi suffix (misal plat 1 baris terpotong)
     if not suffix and easy_suffixes:
@@ -735,22 +718,9 @@ def refine_indonesian_plate(char_raw, easy_raw="", all_easy_texts=None):
     if clean_suffix.endswith('O'):
         clean_suffix = clean_suffix[:-1] + 'D'
 
-    # Validasi Ketat Regulasi Plat Nomor Korlantas Polri:
-    # 1. Prefix wajib 1-2 huruf
-    if not clean_prefix or len(clean_prefix) > 2 or not clean_prefix.isalpha():
-        return ""
-    # 2. Nomor polisi wajib 1-4 digit angka murni
-    clean_digits = re.sub(r'[^0-9]', '', clean_digits)
-    if not clean_digits or not clean_digits.isdigit() or len(clean_digits) > 4:
-        return ""
-    # 3. Total panjang karakter minimal 4 karakter (misal D 1 A, B 12 CD)
-    if len(clean_prefix) + len(clean_digits) + len(clean_suffix) < 4:
-        return ""
-
-    parts = [clean_prefix, clean_digits]
-    if clean_suffix:
-        parts.append(clean_suffix)
-    return " ".join(parts)
+    parts = [p for p in [clean_prefix, clean_digits, clean_suffix] if p]
+    final_text = " ".join(parts) if parts else base_text
+    return final_text
 
 
 def ensemble_plate_reading(plate_crop):
@@ -766,23 +736,20 @@ def ensemble_plate_reading(plate_crop):
     char_raw = char_raw.upper()
     c_clean = re.sub(r'[^A-Z0-9]', '', char_raw)
 
-    # Fast-Path: Jika char_model menghasilkan plat lengkap dengan keyakinan tinggi pada setiap huruf
-    m = re.match(r'^([A-Z]{1,2})(\d{1,4})([A-Z]{1,3})$', c_clean)
-    min_char_conf = min([c["conf"] for c in line1_chars]) if line1_chars else 0.0
-
-    if m and char_conf >= 0.60 and min_char_conf >= 0.45:
+    # Fast-Path: Jika char_model menghasilkan karakter plat (>= 3 karakter dan conf >= 0.35)
+    # Langsung gunakan hasil YOLO char_model tanpa memanggil EasyOCR (menghemat ~400ms CPU)
+    if len(c_clean) >= 3 and char_conf >= 0.35:
         final_formatted = refine_indonesian_plate(char_raw, "", [])
-        if final_formatted:
-            print(f"[DEBUG] Fast-Path Plate Reading : '{final_formatted}' (conf: {char_conf:.2f}, {len(line1_chars)} chars, sub-100ms)")
-            return {
-                "final": final_formatted,
-                "char_raw": char_raw,
-                "char_conf": char_conf,
-                "easy_raw": "",
-                "easy_conf": 0.0,
-                "confidence": char_conf,
-                "method": "char_model_fast_path"
-            }
+        print(f"[DEBUG] Fast-Path Plate Reading : '{final_formatted}' (conf: {char_conf:.2f}, {len(line1_chars)} chars, sub-100ms)")
+        return {
+            "final": final_formatted,
+            "char_raw": char_raw,
+            "char_conf": char_conf,
+            "easy_raw": "",
+            "easy_conf": 0.0,
+            "confidence": char_conf,
+            "method": "char_model_fast_path"
+        }
 
     # 2. Pembacaan via EasyOCR (Secondary / Fallback saat karakter butuh penegasan atau format belum lengkap)
     easy_raw, easy_conf, all_easy = read_plate_with_easyocr(plate_crop)
@@ -791,26 +758,13 @@ def ensemble_plate_reading(plate_crop):
     print(f"[DEBUG] Char Model baca : '{char_raw}' (conf: {char_conf:.2f})")
     print(f"[DEBUG] EasyOCR baca    : '{easy_raw}' (conf: {easy_conf:.2f}, all: {all_easy})")
 
-    # Filter confidence minimum untuk mencegah artefak saat mobil masih bergerak / blur
-    if max(char_conf, easy_conf) < 0.42:
-        print("[DEBUG] Keyakinan karakter terlalu rendah (< 0.42), memfilter noise gerakan...")
-        return {
-            "final": None,
-            "char_raw": char_raw,
-            "char_conf": char_conf,
-            "easy_raw": easy_raw,
-            "easy_conf": easy_conf,
-            "confidence": 0.0,
-            "method": "filtered_low_conf"
-        }
-
     final_formatted = refine_indonesian_plate(char_raw, easy_raw, all_easy)
     final_conf = max(char_conf, easy_conf) if final_formatted else 0.0
 
     print(f"[DEBUG] Hasil Terformat : '{final_formatted}'")
 
     return {
-        "final": final_formatted if final_formatted else None,
+        "final": final_formatted,
         "char_raw": char_raw,
         "char_conf": char_conf,
         "easy_raw": easy_raw,
@@ -822,34 +776,40 @@ def ensemble_plate_reading(plate_crop):
 
 def classify_vehicle_indonesian(image, bbox, initial_vtype, v_conf):
     """
-    Sistem klasifikasi murni berbasis akurasi/confidence model (Argmax):
-    - Jika model deteksi mendeteksi 'bus', 'truck', atau 'motorcycle' dengan akurasi tertinggi,
-      maka tipe tersebut yang langsung dipakai (tanpa dioverride atau dibanding-bandingkan).
-    - Jika model deteksi mendeteksi 'car', bodi kendaraan diambil murni dari kelas body_style
-      dengan probabilitas / confidence tertinggi dari model.
+    Sistem klasifikasi kendaraan:
+    - Mobil MPV / Van keluarga & mewah (Toyota Alphard, Vellfire, HiAce, Staria, Innova, Serena, Voxy)
+      selalu masuk ke kategori 'car' (Mobil) dengan tipe bodi 'MPV', BUKAN bus atau minibus.
+    - Truk dan Motor tetap sesuai kelasnya.
     """
-    if initial_vtype == "bus":
-        return "bus", "Bus", round(v_conf, 3)
-    if initial_vtype == "truck":
-        return "truck", "Truk", round(v_conf, 3)
     if initial_vtype == "motorcycle":
         return "motorcycle", "Motor", round(v_conf, 3)
+    if initial_vtype == "truck":
+        return "truck", "Truk", round(v_conf, 3)
 
-    # Kendaraan adalah mobil (car): ambil body style murni dengan confidence tertinggi
+    # Analisis tipe bodi menggunakan body_style_model
     x1, y1, x2, y2 = bbox
     crop = crop_vehicle_with_context(image, x1, y1, x2, y2, pad_ratio=0.04)
     if crop.size == 0:
-        return "car", "Mobil", round(v_conf, 3)
+        fallback_name = "Mobil" if initial_vtype == "car" else ("Bus" if initial_vtype == "bus" else "Truk")
+        return initial_vtype, fallback_name, round(v_conf, 3)
 
     bs_res = body_style_model.predict(crop, imgsz=224, verbose=False)[0]
     probs = {bs_res.names[i]: float(bs_res.probs.data[i]) for i in range(len(bs_res.names))}
-
-    # Pilih kelas dengan probabilitas / confidence tertinggi murni
     top_name, top_conf = max(probs.items(), key=lambda kv: kv[1])
 
-    # Penamaan bodi umum
+    # Penyerapan bodi Minibus / Wagon / MPV untuk mobil penumpang:
+    # Di gerbang parkir, seluruh mobil Minibus / MPV penumpang (seperti Alphard, Vellfire, HiAce)
+    # masuk kategori car-MPV (Mobil Penumpang), bukan bus atau minibus.
+    if top_name in ['Minibus', 'MPV', 'Wagon'] or (probs.get('Minibus', 0.0) + probs.get('MPV', 0.0) + probs.get('Wagon', 0.0)) >= 0.20:
+        return "car", "MPV", round(max(top_conf, 0.85), 3)
+
+    # Jika initial_vtype adalah bus murni komersial (bukan MPV/Minibus):
+    if initial_vtype == "bus":
+        return "bus", "Bus", round(v_conf, 3)
+
     name_map = {
         'Wagon': 'MPV',
+        'Minibus': 'MPV',
         'Crossover': 'SUV',
         'Pickup Truck': 'Pickup',
         'Convertible': 'Sports Car',
@@ -914,8 +874,9 @@ def run_anpr(image_input, vehicle_conf=0.25, motorcycle_conf=0.08, plate_conf=0.
     vdet = fut_v.result()[0]
     pdet_global = fut_p.result()[0]
 
-    # Filter kendaraan di depan kamera (abaikan kendaraan kecil di latar belakang / kejauhan)
-    min_vehicle_area = (iw * ih) * 0.035  # Minimal 3.5% dari luas layar
+    # Filter kendaraan di depan kamera (abaikan kendaraan kecil di latar belakang / halusinasi ruangan)
+    max_vehicle_area = (iw * ih) * 0.72   # Maksimal 72% luas layar (menghindari kotak raksasa seluruh ruangan)
+    min_vehicle_area = (iw * ih) * 0.04   # Minimal 4% luas layar (menghindari kendaraan kecil di kejauhan)
     min_y2 = ih * 0.35                    # Bagian bawah kendaraan harus mencapai minimal 35% tinggi frame
 
     candidates = []
@@ -929,8 +890,9 @@ def run_anpr(image_input, vehicle_conf=0.25, motorcycle_conf=0.08, plate_conf=0.
         x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
         area = (x2 - x1) * (y2 - y1)
 
-        # Abaikan kendaraan kecil di kejauhan/belakang
-        if area < min_vehicle_area or y2 < min_y2:
+        # Cek apakah box adalah artefak menutupi seluruh layar (dari pojok atas ke pojok bawah)
+        is_room_artifact = (x1 <= 20 and y1 <= 20 and x2 >= iw - 20 and y2 >= ih - 20)
+        if area > max_vehicle_area or area < min_vehicle_area or y2 < min_y2 or is_room_artifact:
             continue
 
         candidates.append({
@@ -1000,8 +962,8 @@ def run_anpr(image_input, vehicle_conf=0.25, motorcycle_conf=0.08, plate_conf=0.
                 plate_conf_val = matched_plate["conf"]
                 abs_plate_bbox = [gpx1, gpy1, gpx2, gpy2]
             elif vehicle_crop.size > 0:
-                # Coba deteksi plat nomor dengan conf sensitif (0.10) pada crop kendaraan
-                pdet_crop = plate_model.predict(vehicle_crop, conf=0.10, imgsz=640, verbose=False)[0]
+                # Tahap 1: Deteksi standar pada crop kendaraan (imgsz=480)
+                pdet_crop = plate_model.predict(vehicle_crop, conf=0.10, imgsz=480, verbose=False)[0]
                 if len(pdet_crop.boxes) > 0:
                     best_b = max(pdet_crop.boxes, key=lambda b: float(b.conf[0]))
                     cpx1, cpy1, cpx2, cpy2 = map(int, best_b.xyxy[0].tolist())
@@ -1010,22 +972,47 @@ def run_anpr(image_input, vehicle_conf=0.25, motorcycle_conf=0.08, plate_conf=0.
                     plate_crop = crop_plate_with_padding(img, abs_plate_bbox[0], abs_plate_bbox[1],
                                                          abs_plate_bbox[2], abs_plate_bbox[3])
                 else:
-                    # Fallback ROI Plat Nomor: Pastikan bounding box plat nomor SELALU ADA & STILL di bemper depan kendaraan
+                    # Tahap 2: Deteksi Adaptif CLAHE untuk Mobil Hitam / Gelap (Low Contrast)
+                    # Memperjelas kontras tepi plat nomor pada bemper gelap/hitam
                     vw = x2 - x1
                     vh = y2 - y1
-                    if vehicle_type == "motorcycle":
-                        p_px1 = max(0, x1 + int(vw * 0.28))
-                        p_py1 = max(0, y1 + int(vh * 0.45))
-                        p_px2 = min(iw, x1 + int(vw * 0.72))
-                        p_py2 = min(ih, y1 + int(vh * 0.75))
+                    by1, by2 = int(vh * 0.45), int(vh * 0.95)
+                    bx1, bx2 = int(vw * 0.15), int(vw * 0.85)
+                    bumper_crop = vehicle_crop[by1:by2, bx1:bx2]
+                    pdet_clahe = None
+                    if bumper_crop.size > 0:
+                        try:
+                            lab = cv2.cvtColor(bumper_crop, cv2.COLOR_BGR2LAB)
+                            l_ch, a_ch, b_ch = cv2.split(lab)
+                            clahe_filter = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+                            l_clahe = clahe_filter.apply(l_ch)
+                            b_clahe = cv2.cvtColor(cv2.merge((l_clahe, a_ch, b_ch)), cv2.COLOR_LAB2BGR)
+                            pdet_clahe = plate_model.predict(b_clahe, conf=0.07, imgsz=480, verbose=False)[0]
+                        except Exception:
+                            pdet_clahe = None
+
+                    if pdet_clahe is not None and len(pdet_clahe.boxes) > 0:
+                        best_b = max(pdet_clahe.boxes, key=lambda b: float(b.conf[0]))
+                        cpx1, cpy1, cpx2, cpy2 = map(int, best_b.xyxy[0].tolist())
+                        plate_conf_val = float(best_b.conf[0])
+                        abs_plate_bbox = [x1 + bx1 + cpx1, y1 + by1 + cpy1, x1 + bx1 + cpx2, y1 + by1 + cpy2]
+                        plate_crop = crop_plate_with_padding(img, abs_plate_bbox[0], abs_plate_bbox[1],
+                                                             abs_plate_bbox[2], abs_plate_bbox[3])
                     else:
-                        p_px1 = max(0, x1 + int(vw * 0.35))
-                        p_py1 = max(0, y1 + int(vh * 0.68))
-                        p_px2 = min(iw, x1 + int(vw * 0.65))
-                        p_py2 = min(ih, y1 + int(vh * 0.86))
-                    abs_plate_bbox = [p_px1, p_py1, p_px2, p_py2]
-                    plate_conf_val = 0.50
-                    plate_crop = crop_plate_with_padding(img, p_px1, p_py1, p_px2, p_py2)
+                        # Tahap 3: Fallback Estimasi Geometri Bumper
+                        if vehicle_type == "motorcycle":
+                            p_px1 = max(0, x1 + int(vw * 0.28))
+                            p_py1 = max(0, y1 + int(vh * 0.45))
+                            p_px2 = min(iw, x1 + int(vw * 0.72))
+                            p_py2 = min(ih, y1 + int(vh * 0.75))
+                        else:
+                            p_px1 = max(0, x1 + int(vw * 0.35))
+                            p_py1 = max(0, y1 + int(vh * 0.68))
+                            p_px2 = min(iw, x1 + int(vw * 0.65))
+                            p_py2 = min(ih, y1 + int(vh * 0.86))
+                        abs_plate_bbox = [p_px1, p_py1, p_px2, p_py2]
+                        plate_conf_val = 0.50
+                        plate_crop = crop_plate_with_padding(img, p_px1, p_py1, p_px2, p_py2)
             else:
                 plate_crop = np.array([])
 
@@ -1162,7 +1149,6 @@ def detect_current():
     if frame is None:
         return jsonify({"error": "Belum ada frame video di memory. Pastikan kamera CCTV sudah terhubung dan aktif."}), 400
 
-    save_record = request.args.get("save_record", "true").lower() in ("true", "1", "yes")
     t0 = time.time()
     result = run_anpr(frame)
     det_time = time.time() - t0
@@ -1171,14 +1157,10 @@ def detect_current():
     if result.get("detections"):
         primary_det = result["detections"][0]
         primary_det["latency_ms"] = round(det_time * 1000)
-        valid_plate = primary_det.get("license_plate")
-        if save_record and valid_plate and str(valid_plate).strip():
-            rec = save_parking_record(primary_det, source_img=frame)
-            primary_det["record"] = rec
-            if rec and rec.get("snapshot_url"):
-                result["image_url"] = rec["snapshot_url"]
-        else:
-            primary_det["record"] = None
+        rec = save_parking_record(primary_det, source_img=frame)
+        primary_det["record"] = rec
+        if rec and rec.get("snapshot_url"):
+            result["image_url"] = rec["snapshot_url"]
 
     return jsonify(result)
 
@@ -1190,7 +1172,6 @@ def detect():
     if "image" not in request.files:
         return jsonify({"error": "Tidak ada file 'image' yang dikirim"}), 400
     file = request.files["image"]
-    save_record = request.form.get("save_record", "true").lower() in ("true", "1", "yes")
     temp_path = "temp_upload.jpg"
     file.save(temp_path)
     try:
@@ -1198,16 +1179,12 @@ def detect():
         result = run_anpr(temp_path)
         det_time = time.time() - t0
         result["detection_time_sec"] = round(det_time, 3)
-        # Simpan ke memory RAM (0ms) HANYA jika diperintahkan (save_record=true) dan terdeteksi plat yang valid
+        # Simpan ke memory RAM (0ms) jika terdeteksi kendaraan
         if result.get("detections"):
             primary_det = result["detections"][0]
             primary_det["latency_ms"] = round(det_time * 1000)
-            valid_plate = primary_det.get("license_plate")
-            if save_record and valid_plate and str(valid_plate).strip():
-                rec = save_parking_record(primary_det, source_img_path=temp_path)
-                primary_det["record"] = rec
-            else:
-                primary_det["record"] = None
+            rec = save_parking_record(primary_det, source_img_path=temp_path)
+            primary_det["record"] = rec
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
