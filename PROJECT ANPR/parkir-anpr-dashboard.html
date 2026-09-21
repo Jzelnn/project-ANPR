@@ -264,69 +264,13 @@
     border-bottom:1px solid var(--line);
     font-size:14px;font-weight:600;color:var(--text);
   }
-  .result-body{padding:18px 18px 20px;}
-  .vehicle-capture-box {
-    position: relative;
-    width: 100%;
-    height: 148px;
-    background: #0f172a;
-    border-radius: 8px;
-    overflow: hidden;
-    border: 1px solid var(--line);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    margin-bottom: 14px;
-    box-shadow: inset 0 2px 6px rgba(0,0,0,0.2);
-  }
-  .vehicle-capture-box img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
-  }
-  .capture-placeholder {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 7px;
-    color: #94a3b8;
-    font-size: 11px;
-    font-weight: 500;
-  }
-  .capture-badge {
-    position: absolute;
-    top: 8px;
-    left: 8px;
-    background: rgba(15, 23, 42, 0.85);
-    backdrop-filter: blur(4px);
-    color: #10b981;
-    border: 1px solid rgba(16, 185, 129, 0.4);
-    font-size: 10px;
-    font-weight: 700;
-    padding: 3px 8px;
-    border-radius: 4px;
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    letter-spacing: 0.5px;
-  }
-  .capture-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: #10b981;
-    box-shadow: 0 0 6px #10b981;
-    animation: pulse 1.2s infinite;
-  }
-  .tags{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;}
+  .result-body{padding:20px 18px 22px;}
+  .tags{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;}
   .tag{
     font-size:12px;padding:4px 10px;border-radius:100px;
     background:var(--panel-2);border:1px solid var(--line);color:var(--text-dim);
   }
   .tag.on{color:var(--accent);border-color:var(--accent-dim);background:rgba(21,128,61,0.08);font-weight:600;}
-  .tag.warn{color:#d97706;border-color:#fde68a;background:rgba(245,158,11,0.08);font-weight:600;}
-  .tag.locked{color:#059669;border-color:#a7f3d0;background:rgba(16,185,129,0.14);font-weight:700;}
   .pct{color:var(--accent);font-weight:600;}
 
   .plate{
@@ -341,15 +285,6 @@
     border-radius:6px;
     margin-bottom:14px;
     box-shadow:0 2px 6px rgba(0,0,0,0.06);
-    transition: all 0.2s ease;
-  }
-  .plate.approaching{
-    background:#f1f5f9;
-    color:#64748b;
-    border:1px dashed #cbd5e1;
-    font-size:17px;
-    letter-spacing:0.5px;
-    font-weight:600;
   }
   .meta{font-size:12px;color:var(--text-dim);display:flex;justify-content:space-between;margin-bottom:14px;}
 
@@ -580,19 +515,6 @@
     <div class="card">
       <div class="result-head">Latest Detection</div>
       <div class="result-body" id="resultBody">
-        <!-- FOTO CAPTURE KENDARAAN DI GERBANG (SNAP / AUTO-TRIGGER) -->
-        <div class="vehicle-capture-box" id="vehicleCaptureBox">
-          <img id="vehicleCaptureImg" src="" alt="Capture Kendaraan" style="display:none;">
-          <div class="capture-placeholder" id="capturePlaceholder">
-            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-            <span>Foto Kendaraan di Gerbang</span>
-          </div>
-          <div class="capture-badge" id="captureBadge" style="display:none;">
-            <span class="capture-dot"></span>
-            <span id="captureBadgeText">GATE CAPTURE</span>
-          </div>
-        </div>
-
         <div class="tags">
           <span class="tag on" id="tagVehicle">-</span>
           <span class="tag" id="tagBodyStyle">-</span>
@@ -971,7 +893,6 @@ async function toggleCamera(){
     // Disconnect camera or video
     stopFpsMonitor();
     stopContinuousAutoDetect();
-    stopAutonomousGateMonitor();
     stopCameraStream();
     const liveVid = document.getElementById('liveVideo');
     if (liveVid){
@@ -1317,8 +1238,7 @@ async function performDetectCycle(silent=true){
   try {
     // Mode Stream: Hikvision ISAPI, CCTV RTSP, DroidCam, RPi, ZeroTier (Direct RAM < 1s)
     if (src === 'hikvision_isapi' || src === 'cctv_rtsp' || src === 'droidcam_stream' || src === 'rpi_stream' || src === 'zerotier_stream'){
-      const saveParam = (isVehicleStationary || !silent) ? "true" : "false";
-      const resp = await fetch(`${DETECT_CURRENT_URL}?save_record=${saveParam}`, { method: "POST" });
+      const resp = await fetch(DETECT_CURRENT_URL, { method: "POST" });
       const roundtripMs = Math.round(performance.now() - t0);
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || "Gagal membaca frame kamera");
@@ -1354,10 +1274,8 @@ async function performDetectCycle(silent=true){
         await new Promise((resolve) => {
           canvas.toBlob(async (blob) => {
             if (!blob){ resolve(); return; }
-            const isPausedOrStop = (video && (video.paused || video.ended)) || isVehicleStationary || !silent;
             const formData = new FormData();
             formData.append("image", blob, (src === 'video_file' ? "video_frame.jpg" : "webcam_frame.jpg"));
-            formData.append("save_record", isPausedOrStop ? "true" : "false");
             try {
               const reqStart = performance.now();
               const resp = await fetch(API_URL, { method: "POST", body: formData });
@@ -1387,197 +1305,23 @@ async function performDetectCycle(silent=true){
 }
 
 // ============================================================
-// AUTONOMOUS GATE STOP MONITOR & AUTO-CAPTURE (SISTEM MANDIRI)
-// ============================================================
-let isAutoCapturing = false;
-let lastAutoCaptureTime = 0;
-let gateAutoMonitorTimer = null;
-let lastMotionVal = 0;
-let stopCounter = 0;
-
-function stopAutonomousGateMonitor(){
-  if (gateAutoMonitorTimer){
-    clearInterval(gateAutoMonitorTimer);
-    gateAutoMonitorTimer = null;
-  }
-}
-
-function startAutonomousGateMonitor(){
-  stopAutonomousGateMonitor();
-  const monitorCanvas = document.createElement('canvas');
-  monitorCanvas.width = 64;
-  monitorCanvas.height = 64;
-  const mCtx = monitorCanvas.getContext('2d', { willReadFrequently: true });
-  let prevFrameData = null;
-
-  gateAutoMonitorTimer = setInterval(() => {
-    const video = document.getElementById('liveVideo');
-    if (!video || video.paused || video.ended || video.videoWidth === 0) return;
-    if (isAutoCapturing) return;
-
-    // Reset cooldown jika video loop ulang ke awal (currentTime < 1.0s)
-    if (video.currentTime < 1.0){
-      lastAutoCaptureTime = 0;
-    }
-
-    const now = Date.now();
-    if (now - lastAutoCaptureTime < 4500) return; // Cooldown 4.5 detik setelah capture
-
-    try {
-      mCtx.drawImage(video, 0, 0, 64, 64);
-      const currData = mCtx.getImageData(0, 0, 64, 64).data;
-      if (prevFrameData) {
-        let diffSum = 0;
-        let count = 0;
-        // Hitung motion di area tengah-bawah (posisi bumper & plat nomor)
-        for (let y = 20; y < 58; y += 2) {
-          for (let x = 12; x < 52; x += 2) {
-            const idx = (y * 64 + x) * 4;
-            diffSum += Math.abs(currData[idx] - prevFrameData[idx]);
-            count++;
-          }
-        }
-        const motion = count > 0 ? (diffSum / count) : 0;
-
-        // 1. Kondisi video sampel: t=2.3s s/d 4.0s (momen berhenti persis di depan palang)
-        const isSampleGateStop = (video.src && video.src.includes('sample_car.mp4')) && (video.currentTime >= 2.3 && video.currentTime <= 4.0);
-        
-        // 2. Kondisi video umum / webcam: motion turun drastis dan stabil
-        const isCarStopped = (lastMotionVal > 7.0 && motion < 5.0) || (motion < 3.8 && stopCounter >= 2);
-
-        if (isSampleGateStop || isCarStopped) {
-          stopCounter = 0;
-          triggerAutoGateCapture(video, isSampleGateStop ? "Palang Gerbang (sample_car.mp4)" : "Mobil Berhenti Otomatis");
-        } else if (motion < 5.5) {
-          stopCounter++;
-        } else {
-          stopCounter = 0;
-        }
-        lastMotionVal = motion;
-      }
-      prevFrameData = currData;
-    } catch(e){}
-  }, 120);
-}
-
-async function triggerAutoGateCapture(video, reason="Auto Stop"){
-  if (isAutoCapturing) return;
-  isAutoCapturing = true;
-  lastAutoCaptureTime = Date.now();
-
-  // 1. Jepret frame berkualitas tinggi seketika dari video
-  const snapCanvas = document.createElement('canvas');
-  snapCanvas.width = Math.min(video.videoWidth || 640, 800);
-  snapCanvas.height = Math.round((video.videoHeight || 480) * (snapCanvas.width / (video.videoWidth || 640)));
-  const sCtx = snapCanvas.getContext('2d');
-  sCtx.drawImage(video, 0, 0, snapCanvas.width, snapCanvas.height);
-
-  const dataUrl = snapCanvas.toDataURL('image/jpeg', 0.88);
-
-  // 2. Taruh foto hasil capture langsung ke UI "Latest Detection" card
-  const snapImg = document.getElementById('vehicleCaptureImg');
-  const placeholder = document.getElementById('capturePlaceholder');
-  const badge = document.getElementById('captureBadge');
-  const badgeTxt = document.getElementById('captureBadgeText');
-
-  if (snapImg){
-    snapImg.src = dataUrl;
-    snapImg.style.display = 'block';
-  }
-  if (placeholder) placeholder.style.display = 'none';
-  if (badge){
-    badge.style.display = 'flex';
-    if (badgeTxt) badgeTxt.textContent = "AI DETECTING...";
-  }
-
-  const tagStop = document.getElementById('tagGateStatus');
-  if (tagStop){
-    tagStop.style.display = 'inline-block';
-    tagStop.className = 'tag locked';
-    tagStop.textContent = 'GATE STOP (CAPTURED)';
-  }
-
-  const plateElem = document.getElementById('plateText');
-  if (plateElem){
-    plateElem.textContent = "Memproses Foto...";
-    plateElem.className = 'plate approaching';
-  }
-
-  showToast(`Mobil berhenti di gerbang: Foto otomatis dijepret (${reason})!`);
-
-  // 3. AI mendeteksi langsung dari FOTO KENDARAAN tersebut secara mandiri
-  snapCanvas.toBlob(async (blob) => {
-    if (!blob){
-      isAutoCapturing = false;
-      return;
-    }
-    const formData = new FormData();
-    formData.append("image", blob, "auto_gate_capture.jpg");
-    formData.append("save_record", "true");
-
-    const t0 = performance.now();
-    try {
-      const resp = await fetch(API_URL, { method: "POST", body: formData });
-      const data = await resp.json();
-      const detMs = Math.round(performance.now() - t0);
-      data.roundtrip_ms = detMs;
-
-      if (data.detections && data.detections.length > 0){
-        const det = data.detections[0];
-        det.latency_ms = detMs;
-        det.is_stationary = true;
-        det.snapshot_url = dataUrl;
-        lastDetectionData = det;
-
-        // Tampilkan hasil deteksi dari foto ke UI
-        updateResultCard(det, detMs);
-        drawBoxes(det);
-
-        // Catat ke Entry History
-        if (det.license_plate){
-          addLogRow(det);
-          showToast(`Plat Terdeteksi dari Foto: ${det.license_plate} (${det.body_style || 'MPV'}) [${detMs}ms]`);
-        }
-        if (badgeTxt) badgeTxt.textContent = "GATE CAPTURE";
-      } else {
-        if (plateElem) plateElem.textContent = "Plat Tidak Terbaca";
-        if (badgeTxt) badgeTxt.textContent = "NO VEHICLE";
-      }
-    } catch(err){
-      console.warn("Auto capture error:", err);
-      if (badgeTxt) badgeTxt.textContent = "CAPTURE ERROR";
-    } finally {
-      isAutoCapturing = false;
-    }
-  }, 'image/jpeg', 0.88);
-}
-
-// ============================================================
 // VIDEO FILE PLAYBACK & AUTO-SCAN (IN-BROWSER & BACKEND)
 // ============================================================
 function attachVideoEventListeners(video){
   if (!video) return;
 
-  // 1. Saat video diputar (play / playing): otomatis jalankan monitor stop mandiri
-  video.addEventListener('play', () => {
-    startAutonomousGateMonitor();
-  });
-  video.addEventListener('playing', () => {
-    startAutonomousGateMonitor();
-  });
-
-  // 2. Saat mobil berhenti / video di-pause: cadangan jika user pause manual
+  // 1. Saat mobil berhenti / video di-pause: langsung scan seketika tanpa nunggu tombol
   video.addEventListener('pause', () => {
-    if (!video.ended && isCameraConnected && !isAutoCapturing){
-      showToast("Mobil berhenti / Video di-pause: Menjepret foto & memindai...");
-      triggerAutoGateCapture(video, "Video di-pause");
+    if (!video.ended && isCameraConnected){
+      showToast("Mobil berhenti / Video di-pause: Memindai plat seketika...");
+      performDetectCycle(false);
     }
   });
 
-  // 3. Saat slider timeline video digeser ke momen tertentu
+  // 2. Saat slider timeline video digeser ke momen tertentu
   video.addEventListener('seeked', () => {
-    if (isCameraConnected && !isAutoCapturing){
-      triggerAutoGateCapture(video, "Timeline Seeked");
+    if (isCameraConnected){
+      performDetectCycle(false);
     }
   });
 }
@@ -1626,7 +1370,6 @@ async function handleVideoFile(file){
 
   // Mulai continuous auto-detection seketika
   startContinuousAutoDetect();
-  startAutonomousGateMonitor();
 
   // Simpan file ke server di latar belakang
   const formData = new FormData();
@@ -1698,7 +1441,6 @@ async function loadSampleVideo(){
   showToast("Memutar video sampel mobil masuk gate - Auto-Scan aktif!");
 
   startContinuousAutoDetect();
-  startAutonomousGateMonitor();
 }
 
 function setVideoSpeed(val){
@@ -1729,9 +1471,6 @@ function handleDetectionResult(data, silent=false){
     det.latency_ms = detMs;
     lastDetectionData = det;
 
-    const liveVid = document.getElementById('liveVideo');
-    const isVideoPaused = (src === 'video_file' || src === 'webcam') && liveVid && (liveVid.paused || liveVid.ended);
-
     // Deteksi Mobil Berhenti di Gerbang (Stationary / Gate Dwell Tracking)
     if (det.bbox){
       const [bx1, by1, bx2, by2] = det.bbox;
@@ -1739,10 +1478,10 @@ function handleDetectionResult(data, silent=false){
       const bcy = (by1 + by2) / 2.0;
       if (lastBoxCenter){
         const dist = Math.hypot(bcx - lastBoxCenter.x, bcy - lastBoxCenter.y);
-        // Jika perpindahan stabil (< 25 px) atau video di-pause, mobil BERHENTI di gerbang!
-        if (dist < 25 || isVideoPaused){
+        // Jika koordinat mobil stabil (perpindahan < 22 px), mobil sedang BERHENTI di gerbang!
+        if (dist < 22){
           stationaryFrameCount++;
-          if (stationaryFrameCount >= 2 || isVideoPaused){
+          if (stationaryFrameCount >= 2){
             isVehicleStationary = true;
           }
         } else {
@@ -1752,10 +1491,6 @@ function handleDetectionResult(data, silent=false){
       }
       lastBoxCenter = { x: bcx, y: bcy };
     }
-    if (isVideoPaused || !silent){
-      // Jika video di-pause atau manual scan, anggap kendaraan berhenti untuk membaca plat
-      isVehicleStationary = true;
-    }
     det.is_stationary = isVehicleStationary;
 
     drawBoxes(det);
@@ -1763,28 +1498,28 @@ function handleDetectionResult(data, silent=false){
 
     const plateStr = (det.license_plate || '').trim();
     const nowMs = Date.now();
+    const cleanPlate = plateStr.replace(/[^A-Za-z0-9]/g, '');
+    const hasValidPlate = cleanPlate.length >= 3 && cleanPlate !== 'TIDAKTERBACA';
+    const plateKey = hasValidPlate ? cleanPlate : (isVehicleStationary ? (det.body_style || det.vehicle_type || 'VEHICLE') : '');
 
-    // HANYA MASUKKAN KE ENTRY HISTORY JIKA MOBIL SUDAH BERHENTI (GATE STOP) & PLAT VALID
-    // Sesuai aturan: "kalau mobil blm berhenti sebentar hasil detect jngn langsung masuk ke entry history"
-    if (det.is_stationary && plateStr){
-      const plateKey = plateStr;
-      if (!lastLoggedPlate || plateKey !== lastLoggedPlate || (nowMs - lastLoggedTime > 3000)){
-        addLogRow(det);
-        lastLoggedPlate = plateKey;
-        lastLoggedTime = nowMs;
-        const timeMs = detMs > 0 ? ` (${detMs} ms)` : (data.detection_time_sec ? ` (${data.detection_time_sec}s)` : '');
-        showToast(`Plat Terverifikasi di Gerbang: ${plateStr} [GATE STOP]${timeMs}`);
-      } else if (!silent){
-        const timeMs = detMs > 0 ? ` (${detMs} ms)` : '';
-        showToast(`Plat: ${plateStr}${timeMs}`);
-      }
-    } else if (!silent && plateStr){
-      showToast(`Plat terdeteksi: ${plateStr}`);
+    // Catat ke Entry History hanya jika plat terbaca valid ATAU mobil sudah berhenti (stationary) di gerbang
+    // Mencegah spam/duplikasi saat mobil masih dalam fase bergerak mendekat
+    if (plateKey && (!lastLoggedPlate || plateKey !== lastLoggedPlate || (nowMs - lastLoggedTime > 4000))){
+      addLogRow(det);
+      lastLoggedPlate = plateKey;
+      lastLoggedTime = nowMs;
+      const timeMs = detMs > 0 ? ` (${detMs} ms)` : (data.detection_time_sec ? ` (${data.detection_time_sec}s)` : '');
+      const plateShow = plateStr || det.body_style || det.vehicle_type;
+      showToast(`Plat terdeteksi: ${plateShow}${timeMs}`);
+    } else if (!silent){
+      const timeMs = detMs > 0 ? ` (${detMs} ms)` : '';
+      showToast(`Plat: ${plateStr || 'Vehicle detected'}${timeMs}`);
     }
   } else {
     consecutiveEmptyCycles++;
-    // Anti-flicker: Jangan langsung hapus kotak seketika, beri toleransi 3 cycle agar kotak tetap terkunci saat mobil berhenti
-    if (consecutiveEmptyCycles >= 3){
+    // Anti-flicker: Pertahankan bounding box tetap still (diam / terkunci) saat kendaraan berhenti di gerbang
+    // Berikan toleransi hingga 8 siklus (~6-8 detik) agar kotak tidak berkedip atau hilang tiba-tiba
+    if (consecutiveEmptyCycles >= 8){
       clearBoxes();
       lastDetectionData = null;
       lastBoxCenter = null;
@@ -1840,21 +1575,6 @@ document.getElementById('fileInput').addEventListener('change', async (e) => {
   const imgURL = URL.createObjectURL(file);
   const feedBody = document.getElementById('feedBody');
   feedBody.innerHTML = `<div class="feed-wrap"><img id="feedImg" src="${imgURL}"></div><canvas id="captureCanvas" style="display:none;"></canvas>`;
-
-  // Tampilkan foto di kartu Latest Detection
-  const snapImg = document.getElementById('vehicleCaptureImg');
-  const placeholder = document.getElementById('capturePlaceholder');
-  const badge = document.getElementById('captureBadge');
-  const badgeTxt = document.getElementById('captureBadgeText');
-  if (snapImg){
-    snapImg.src = imgURL;
-    snapImg.style.display = 'block';
-  }
-  if (placeholder) placeholder.style.display = 'none';
-  if (badge){
-    badge.style.display = 'flex';
-    if (badgeTxt) badgeTxt.textContent = "PHOTO UPLOAD";
-  }
 
   const formData = new FormData();
   formData.append("image", file);
@@ -1977,11 +1697,37 @@ function drawBoxes(det){
       boxVeh.style.display = 'none';
     }
 
-    // 2. Kotak Bounding Box Plat Nomor (Kuning)
+    // 2. Kotak Bounding Box Plat Nomor (Kuning) - ALWAYS STILL ON VEHICLE & PLATE
     let boxPlate = wrap.querySelector('#detBoxPlate');
-    // Kotak plat nomor kuning HANYA dimunculkan saat mobil berhenti di gerbang dan ada plat valid
-    if (det.plate_bbox && det.is_stationary && det.license_plate){
-      const [x1,y1,x2,y2] = det.plate_bbox;
+    let effectivePlateBox = det.plate_bbox;
+
+    // Jika frame saat ini belum mendapatkan plate_bbox, tetapi ada plate_bbox sebelumnya
+    // pada mobil yang sama, atau hitung estimasi plate relative terhadap bbox mobil:
+    if (!effectivePlateBox && lastDetectionData && lastDetectionData.plate_bbox && det.bbox){
+      effectivePlateBox = lastDetectionData.plate_bbox;
+    } else if (!effectivePlateBox && det.bbox){
+      const [vx1, vy1, vx2, vy2] = det.bbox;
+      const vw = vx2 - vx1;
+      const vh = vy2 - vy1;
+      if (det.vehicle_type === 'motorcycle'){
+        effectivePlateBox = [
+          Math.round(vx1 + vw * 0.28),
+          Math.round(vy1 + vh * 0.45),
+          Math.round(vx1 + vw * 0.72),
+          Math.round(vy1 + vh * 0.75)
+        ];
+      } else {
+        effectivePlateBox = [
+          Math.round(vx1 + vw * 0.35),
+          Math.round(vy1 + vh * 0.68),
+          Math.round(vx1 + vw * 0.65),
+          Math.round(vy1 + vh * 0.86)
+        ];
+      }
+    }
+
+    if (effectivePlateBox){
+      const [x1,y1,x2,y2] = effectivePlateBox;
       if (!boxPlate){
         boxPlate = document.createElement('div');
         boxPlate.id = 'detBoxPlate';
@@ -1999,7 +1745,13 @@ function drawBoxes(det){
       boxPlate.style.top = Math.round(offsetY + y1 * scale) + 'px';
       boxPlate.style.width = Math.round((x2 - x1) * scale) + 'px';
       boxPlate.style.height = Math.round((y2 - y1) * scale) + 'px';
-      boxPlate.querySelector('.det-label').textContent = det.license_plate;
+      if (det.is_stationary){
+        boxPlate.classList.add('stationary-locked');
+      } else {
+        boxPlate.classList.remove('stationary-locked');
+      }
+      const plateTextDisplay = det.license_plate || (lastDetectionData && lastDetectionData.license_plate) || 'PLAT NOMOR';
+      boxPlate.querySelector('.det-label').textContent = plateTextDisplay;
     } else if (boxPlate){
       boxPlate.style.display = 'none';
     }
@@ -2037,41 +1789,13 @@ function updateResultCard(det, detMs){
   if (tagStop){
     if (det.is_stationary){
       tagStop.style.display = 'inline-block';
-      tagStop.className = 'tag locked';
       tagStop.textContent = 'GATE STOP (LOCKED)';
     } else {
-      tagStop.style.display = 'inline-block';
-      tagStop.className = 'tag warn';
-      tagStop.textContent = 'MENDEKATI GERBANG';
+      tagStop.style.display = 'none';
     }
   }
 
-  // Update foto kendaraan hasil capture di Latest Detection card
-  const snapImg = document.getElementById('vehicleCaptureImg');
-  const placeholder = document.getElementById('capturePlaceholder');
-  const badge = document.getElementById('captureBadge');
-  const badgeTxt = document.getElementById('captureBadgeText');
-
-  if (det.snapshot_url && snapImg){
-    const fullSnapUrl = (det.snapshot_url.startsWith('http') || det.snapshot_url.startsWith('data:') || det.snapshot_url.startsWith('blob:'))
-      ? det.snapshot_url
-      : `http://${HOST}:5001${det.snapshot_url}`;
-    snapImg.src = fullSnapUrl;
-    snapImg.style.display = 'block';
-    if (placeholder) placeholder.style.display = 'none';
-    if (badge) badge.style.display = 'flex';
-    if (badgeTxt) badgeTxt.textContent = det.is_stationary ? "GATE CAPTURE" : "SNAPSHOT";
-  }
-
-  const plateElem = document.getElementById('plateText');
-  if (det.is_stationary){
-    plateElem.textContent = det.license_plate || 'Unreadable';
-    plateElem.className = 'plate';
-  } else {
-    // Saat mobil belum berhenti, jangan tampilkan plat aneh!
-    plateElem.textContent = 'Mendekati Gerbang...';
-    plateElem.className = 'plate approaching';
-  }
+  document.getElementById('plateText').textContent = det.license_plate || 'Unreadable';
   const confPct = det.plate_confidence ? Math.round(det.plate_confidence*100)+'%' : (det.vehicle_confidence ? Math.round(det.vehicle_confidence*100)+'%' : '-');
   document.getElementById('pctConf').textContent = confPct;
 
@@ -2148,21 +1872,6 @@ async function loadHistoryFromBackend(){
       const latElem = document.getElementById('pctLatency');
       if (latElem) latElem.textContent = '-';
       document.getElementById('detTime').textContent = latest.timestamp.slice(11, 19);
-
-      if (latest.snapshot_url){
-        const snapImg = document.getElementById('vehicleCaptureImg');
-        const placeholder = document.getElementById('capturePlaceholder');
-        const badge = document.getElementById('captureBadge');
-        if (snapImg){
-          snapImg.src = `http://${HOST}:5001${latest.snapshot_url}`;
-          snapImg.style.display = 'block';
-          if (placeholder) placeholder.style.display = 'none';
-          if (badge){
-            badge.style.display = 'flex';
-            document.getElementById('captureBadgeText').textContent = "LAST ENTRY";
-          }
-        }
-      }
     } else {
       logList.innerHTML = '<div style="padding:18px;font-size:12px;color:var(--text-dim);text-align:center;">No vehicle records yet</div>';
     }

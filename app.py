@@ -774,50 +774,170 @@ def ensemble_plate_reading(plate_crop):
     }
 
 
+class VehicleTemporalTracker:
+    """
+    Lightweight IoU Vehicle Tracker & Temporal Smoothing Buffer.
+    Menstabilkan deteksi vehicle_type dan body_style saat kendaraan bergerak
+    menggunakan Weighted Moving Average dan Majority Voting lintas frame.
+    """
+    def __init__(self, history_len=10, max_idle_sec=2.0):
+        self.history_len = history_len
+        self.max_idle_sec = max_idle_sec
+        self.tracks = {}  # {track_id: dict}
+        self.next_track_id = 1
+        self.lock = threading.Lock()
+
+    def _compute_iou(self, boxA, boxB):
+        xA = max(boxA[0], boxB[0])
+        yA = max(boxA[1], boxB[1])
+        xB = min(boxA[2], boxB[2])
+        yB = min(boxA[3], boxB[3])
+        inter = max(0, xB - xA) * max(0, yB - yA)
+        areaA = (boxA[2] - boxA[0]) * (boxA[3] - boxA[1])
+        areaB = (boxB[2] - boxB[0]) * (boxB[3] - boxB[1])
+        union = areaA + areaB - inter
+        return inter / union if union > 0 else 0.0
+
+    def _compute_center_dist(self, boxA, boxB):
+        cxA, cyA = (boxA[0] + boxA[2]) / 2.0, (boxA[1] + boxA[3]) / 2.0
+        cxB, cyB = (boxB[0] + boxB[2]) / 2.0, (boxB[1] + boxB[3]) / 2.0
+        diag = np.hypot(boxA[2] - boxA[0], boxA[3] - boxA[1])
+        return np.hypot(cxA - cxB, cyA - cyB) / max(1.0, diag)
+
+    def update(self, image, bbox, initial_vtype, v_conf):
+        now = time.time()
+        with self.lock:
+            # 1. Bersihkan track lama yang sudah lewat / idle > max_idle_sec
+            expired = [tid for tid, tr in self.tracks.items() if now - tr["last_seen"] > self.max_idle_sec]
+            for tid in expired:
+                del self.tracks[tid]
+
+            # 2. Cocokkan bbox dengan track yang ada menggunakan IoU / kedekatan pusat
+            best_tid = None
+            best_score = 0.0
+            for tid, tr in self.tracks.items():
+                iou = self._compute_iou(bbox, tr["bbox"])
+                cdist = self._compute_center_dist(bbox, tr["bbox"])
+                score = iou if iou >= 0.20 else (0.5 - cdist if cdist < 0.35 else 0.0)
+                if score > best_score:
+                    best_score = score
+                    best_tid = tid
+
+            if best_tid is None:
+                best_tid = self.next_track_id
+                self.next_track_id += 1
+                self.tracks[best_tid] = {
+                    "bbox": bbox,
+                    "vtypes": deque(maxlen=self.history_len),
+                    "probs": deque(maxlen=self.history_len),
+                    "locked": False,
+                    "locked_vtype": None,
+                    "locked_bstyle": None,
+                    "locked_conf": None,
+                    "plate": None,
+                    "last_seen": now
+                }
+
+            track = self.tracks[best_tid]
+            track["bbox"] = bbox
+            track["last_seen"] = now
+
+            # Jika track sudah terkunci (misal plat sudah terbaca sebelumnya), kembalikan hasil terkunci stabil
+            if track["locked"]:
+                return track["locked_vtype"], track["locked_bstyle"], track["locked_conf"], best_tid
+
+            # Update history vehicle_type
+            track["vtypes"].append((initial_vtype, v_conf))
+
+            # Evaluasi jenis kendaraan motor / truk langsung
+            if initial_vtype == "motorcycle":
+                track["cur_vtype"], track["cur_bstyle"], track["cur_conf"] = "motorcycle", "Motor", round(v_conf, 3)
+                return "motorcycle", "Motor", round(v_conf, 3), best_tid
+            if initial_vtype == "truck":
+                track["cur_vtype"], track["cur_bstyle"], track["cur_conf"] = "truck", "Truk", round(v_conf, 3)
+                return "truck", "Truk", round(v_conf, 3), best_tid
+
+            # Analisis tipe bodi menggunakan body_style_model
+            x1, y1, x2, y2 = bbox
+            crop = crop_vehicle_with_context(image, x1, y1, x2, y2, pad_ratio=0.04)
+            if crop.size > 0:
+                bs_res = body_style_model.predict(crop, imgsz=224, verbose=False)[0]
+                cur_probs = {bs_res.names[i]: float(bs_res.probs.data[i]) for i in range(len(bs_res.names))}
+                track["probs"].append(cur_probs)
+
+            name_map = {
+                'Wagon': 'MPV',
+                'Minibus': 'MPV',
+                'Crossover': 'SUV',
+                'Pickup Truck': 'Pickup',
+                'Convertible': 'Sports Car',
+                'Sports_HardtopConvertible': 'Sports Car'
+            }
+
+            if not track["probs"]:
+                fallback_name = "Mobil" if initial_vtype == "car" else "Bus"
+                return initial_vtype, fallback_name, round(v_conf, 3), best_tid
+
+            # Hitung Weighted Moving Average untuk probabilitas tipe bodi (frame terbaru bobot lebih besar)
+            smoothed_probs = {}
+            total_w = 0.0
+            for idx, p_dict in enumerate(track["probs"]):
+                w = 1.0 + (idx * 0.20)
+                total_w += w
+                for k, v in p_dict.items():
+                    smoothed_probs[k] = smoothed_probs.get(k, 0.0) + (v * w)
+
+            for k in smoothed_probs:
+                smoothed_probs[k] /= total_w
+
+            # Evaluasi kategori Indonesia pada probabilitas yang sudah di-smooth:
+            minibus_mpv_score = smoothed_probs.get('Minibus', 0.0) + smoothed_probs.get('MPV', 0.0) + smoothed_probs.get('Wagon', 0.0)
+            top_name, top_conf = max(smoothed_probs.items(), key=lambda kv: kv[1])
+
+            if top_name in ['Minibus', 'MPV', 'Wagon'] or minibus_mpv_score >= 0.20:
+                smoothed_vtype = "car"
+                smoothed_bstyle = "MPV"
+                smoothed_conf = round(max(top_conf, 0.85), 3)
+            elif initial_vtype == "bus":
+                smoothed_vtype = "bus"
+                smoothed_bstyle = "Bus"
+                smoothed_conf = round(v_conf, 3)
+            else:
+                smoothed_vtype = "car"
+                smoothed_bstyle = name_map.get(top_name, top_name)
+                smoothed_conf = round(top_conf, 3)
+
+            track["cur_vtype"] = smoothed_vtype
+            track["cur_bstyle"] = smoothed_bstyle
+            track["cur_conf"] = smoothed_conf
+            return smoothed_vtype, smoothed_bstyle, smoothed_conf, best_tid
+
+    def lock_track(self, track_id, plate_text=None):
+        """Mengunci hasil klasifikasi kendaraan saat plat nomor terdeteksi atau mobil berhenti."""
+        with self.lock:
+            if track_id in self.tracks:
+                tr = self.tracks[track_id]
+                if not tr["locked"]:
+                    tr["locked"] = True
+                    tr["locked_vtype"] = tr.get("cur_vtype", "car")
+                    tr["locked_bstyle"] = tr.get("cur_bstyle", "MPV")
+                    tr["locked_conf"] = tr.get("cur_conf", 0.90)
+                    tr["plate"] = plate_text
+
+
+# Global tracker instance
+vehicle_tracker = VehicleTemporalTracker()
+
+
 def classify_vehicle_indonesian(image, bbox, initial_vtype, v_conf):
     """
-    Sistem klasifikasi kendaraan:
+    Sistem klasifikasi kendaraan dengan tracking temporal & penyerapan MPV:
     - Mobil MPV / Van keluarga & mewah (Toyota Alphard, Vellfire, HiAce, Staria, Innova, Serena, Voxy)
       selalu masuk ke kategori 'car' (Mobil) dengan tipe bodi 'MPV', BUKAN bus atau minibus.
-    - Truk dan Motor tetap sesuai kelasnya.
+    - Dilengkapi temporal smoothing agar tidak berkedip saat kendaraan bergerak.
     """
-    if initial_vtype == "motorcycle":
-        return "motorcycle", "Motor", round(v_conf, 3)
-    if initial_vtype == "truck":
-        return "truck", "Truk", round(v_conf, 3)
-
-    # Analisis tipe bodi menggunakan body_style_model
-    x1, y1, x2, y2 = bbox
-    crop = crop_vehicle_with_context(image, x1, y1, x2, y2, pad_ratio=0.04)
-    if crop.size == 0:
-        fallback_name = "Mobil" if initial_vtype == "car" else ("Bus" if initial_vtype == "bus" else "Truk")
-        return initial_vtype, fallback_name, round(v_conf, 3)
-
-    bs_res = body_style_model.predict(crop, imgsz=224, verbose=False)[0]
-    probs = {bs_res.names[i]: float(bs_res.probs.data[i]) for i in range(len(bs_res.names))}
-    top_name, top_conf = max(probs.items(), key=lambda kv: kv[1])
-
-    # Penyerapan bodi Minibus / Wagon / MPV untuk mobil penumpang:
-    # Di gerbang parkir, seluruh mobil Minibus / MPV penumpang (seperti Alphard, Vellfire, HiAce)
-    # masuk kategori car-MPV (Mobil Penumpang), bukan bus atau minibus.
-    if top_name in ['Minibus', 'MPV', 'Wagon'] or (probs.get('Minibus', 0.0) + probs.get('MPV', 0.0) + probs.get('Wagon', 0.0)) >= 0.20:
-        return "car", "MPV", round(max(top_conf, 0.85), 3)
-
-    # Jika initial_vtype adalah bus murni komersial (bukan MPV/Minibus):
-    if initial_vtype == "bus":
-        return "bus", "Bus", round(v_conf, 3)
-
-    name_map = {
-        'Wagon': 'MPV',
-        'Minibus': 'MPV',
-        'Crossover': 'SUV',
-        'Pickup Truck': 'Pickup',
-        'Convertible': 'Sports Car',
-        'Sports_HardtopConvertible': 'Sports Car'
-    }
-    body_style = name_map.get(top_name, top_name)
-
-    return "car", body_style, round(top_conf, 3)
+    vtype, bstyle, conf, _ = vehicle_tracker.update(image, bbox, initial_vtype, v_conf)
+    return vtype, bstyle, conf
 
 
 def map_indonesian_body_style(probs_dict, bbox, img_shape):
@@ -937,7 +1057,7 @@ def run_anpr(image_input, vehicle_conf=0.25, motorcycle_conf=0.08, plate_conf=0.
             x1, y1, x2, y2 = cand["x1"], cand["y1"], cand["x2"], cand["y2"]
             vehicle_crop = img[y1:y2, x1:x2]
 
-            vehicle_type, body_style, body_style_conf = classify_vehicle_indonesian(
+            vehicle_type, body_style, body_style_conf, track_id = vehicle_tracker.update(
                 img, [x1, y1, x2, y2], initial_vtype, v_conf
             )
 
@@ -1020,6 +1140,9 @@ def run_anpr(image_input, vehicle_conf=0.25, motorcycle_conf=0.08, plate_conf=0.
                 ensemble_res = ensemble_plate_reading(plate_crop)
                 plate_text = ensemble_res["final"]
                 ocr_method = ensemble_res["method"]
+                clean_p = re.sub(r'[^A-Z0-9]', '', plate_text) if plate_text else ""
+                if clean_p and len(clean_p) >= 3:
+                    vehicle_tracker.lock_track(track_id, plate_text)
 
             results_out.append({
                 "vehicle_type": vehicle_type,
@@ -1031,6 +1154,7 @@ def run_anpr(image_input, vehicle_conf=0.25, motorcycle_conf=0.08, plate_conf=0.
                 "plate_confidence": round(plate_conf_val, 3) if plate_conf_val else None,
                 "bbox": [x1, y1, x2, y2],
                 "plate_bbox": abs_plate_bbox,
+                "track_id": track_id,
                 "image_width": iw,
                 "image_height": ih,
             })

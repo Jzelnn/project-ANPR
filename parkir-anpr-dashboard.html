@@ -1498,10 +1498,13 @@ function handleDetectionResult(data, silent=false){
 
     const plateStr = (det.license_plate || '').trim();
     const nowMs = Date.now();
-    const plateKey = plateStr || (det.body_style || det.vehicle_type || 'VEHICLE');
+    const cleanPlate = plateStr.replace(/[^A-Za-z0-9]/g, '');
+    const hasValidPlate = cleanPlate.length >= 3 && cleanPlate !== 'TIDAKTERBACA';
+    const plateKey = hasValidPlate ? cleanPlate : (isVehicleStationary ? (det.body_style || det.vehicle_type || 'VEHICLE') : '');
 
-    // Begitu mobil berhenti atau plat terbaca, langsung catat ke Entry History
-    if (!lastLoggedPlate || plateKey !== lastLoggedPlate || (nowMs - lastLoggedTime > 3000)){
+    // Catat ke Entry History hanya jika plat terbaca valid ATAU mobil sudah berhenti (stationary) di gerbang
+    // Mencegah spam/duplikasi saat mobil masih dalam fase bergerak mendekat
+    if (plateKey && (!lastLoggedPlate || plateKey !== lastLoggedPlate || (nowMs - lastLoggedTime > 4000))){
       addLogRow(det);
       lastLoggedPlate = plateKey;
       lastLoggedTime = nowMs;
