@@ -1,0 +1,2241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Parkour ANPR - Live Dashboard</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600;700&display=swap');
+
+  :root{
+    --bg: #f2f4f7;
+    --panel: #ffffff;
+    --panel-2: #eef1f5;
+    --line: #e1e5ea;
+    --text: #1a1d23;
+    --text-dim: #6b7280;
+    --accent: #15803d;
+    --accent-dim: #bfe8cf;
+    --blue: #2f6fed;
+    --warn: #b7791f;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{
+    background:var(--bg);
+    color:var(--text);
+    font-family:'IBM Plex Sans',sans-serif;
+    min-height:100vh;
+    padding:28px;
+  }
+  .mono{font-family:'IBM Plex Mono',monospace;}
+
+  header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding-bottom:22px;
+    border-bottom:1px solid var(--line);
+    margin-bottom:24px;
+  }
+  .brand{display:flex;align-items:center;gap:12px;}
+  .brand svg{flex-shrink:0;}
+  .brand h1{font-size:19px;font-weight:600;letter-spacing:0.2px;}
+  .brand span{display:block;font-size:12px;color:var(--text-dim);margin-top:2px;}
+  .clock{text-align:right;}
+  .clock .time{font-family:'IBM Plex Mono',monospace;font-size:20px;font-weight:600;}
+  .clock .date{font-size:12px;color:var(--text-dim);margin-top:2px;}
+
+  .layout{
+    display:grid;
+    grid-template-columns:1.55fr 1fr;
+    gap:20px;
+  }
+  @media (max-width:960px){
+    .layout{grid-template-columns:1fr;}
+  }
+
+  .card{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:10px;
+    overflow:hidden;
+  }
+
+  .feed-head{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:12px 18px;
+    border-bottom:1px solid var(--line);
+    gap:10px;
+    flex-wrap:wrap;
+  }
+  .feed-head-left{display:flex;align-items:center;gap:10px;}
+  .feed-head h2{font-size:14px;font-weight:600;color:var(--text);}
+  
+  .source-select{
+    font-family:'IBM Plex Sans',sans-serif;
+    font-size:12px;
+    padding:5px 8px;
+    border-radius:6px;
+    border:1px solid var(--line);
+    background:var(--panel-2);
+    color:var(--text);
+    cursor:pointer;
+  }
+
+  .feed-head-actions{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    flex-wrap:wrap;
+  }
+
+  .ctrl-btn{
+    font-family:'IBM Plex Sans',sans-serif;
+    font-size:12px;
+    font-weight:600;
+    color:#fff;
+    background:var(--accent);
+    border:none;
+    border-radius:6px;
+    padding:6px 12px;
+    cursor:pointer;
+    display:flex;
+    align-items:center;
+    gap:5px;
+    transition:all 0.15s;
+  }
+  .ctrl-btn:hover{opacity:0.9;}
+  .ctrl-btn.danger{background:#dc2626;}
+  .ctrl-btn.secondary{background:var(--blue);}
+  .ctrl-btn:disabled{opacity:0.5;cursor:wait;}
+
+  .auto-scan-wrap{
+    display:flex;
+    align-items:center;
+    gap:5px;
+    font-size:12px;
+    font-weight:500;
+    color:var(--text);
+    cursor:pointer;
+    user-select:none;
+    background:var(--panel-2);
+    padding:5px 9px;
+    border-radius:6px;
+    border:1px solid var(--line);
+  }
+
+  .upload-btn{
+    font-family:'IBM Plex Sans',sans-serif;
+    font-size:12px;
+    font-weight:600;
+    color:var(--text);
+    background:var(--panel-2);
+    border:1px solid var(--line);
+    border-radius:6px;
+    padding:6px 12px;
+    cursor:pointer;
+  }
+  .upload-btn:hover{background:#e2e6ec;}
+  .upload-btn:disabled{opacity:0.5;cursor:wait;}
+
+  .live-pill{
+    display:flex;align-items:center;gap:6px;
+    font-size:11px;font-weight:600;color:var(--accent);
+    font-family:'IBM Plex Mono',monospace;
+    background:rgba(21,128,61,0.08);
+    padding:4px 8px;border-radius:100px;
+    border:1px solid var(--accent-dim);
+  }
+  .live-pill.off{
+    color:var(--text-dim);
+    background:var(--panel-2);
+    border-color:var(--line);
+  }
+  .dot{
+    width:7px;height:7px;border-radius:50%;
+    background:var(--accent);
+    animation:pulse 1.6s ease-in-out infinite;
+  }
+  .dot.off{
+    background:var(--text-dim);
+    animation:none;
+  }
+  @keyframes pulse{
+    0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(21,128,61,0.4);}
+    50%{opacity:0.6;box-shadow:0 0 0 6px rgba(21,128,61,0);}
+  }
+
+  .rpi-url-bar{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    padding:8px 18px;
+    background:var(--panel-2);
+    border-bottom:1px solid var(--line);
+    font-size:12px;
+    color:var(--text-dim);
+  }
+  .rpi-url-bar input{
+    flex:1;
+    padding:5px 9px;
+    font-family:'IBM Plex Mono',monospace;
+    font-size:12px;
+    border:1px solid var(--line);
+    border-radius:5px;
+    background:#fff;
+    color:var(--text);
+  }
+
+  .feed-body{
+    position:relative;
+    aspect-ratio:16/10;
+    background:
+      linear-gradient(#dde1e7 1px, transparent 1px),
+      linear-gradient(90deg, #dde1e7 1px, transparent 1px),
+      #f7f8fa;
+    background-size:32px 32px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    overflow:hidden;
+  }
+  .feed-body::before,.feed-body::after{
+    content:"";
+    position:absolute;
+    width:26px;height:26px;
+    border-color:var(--blue);
+    border-style:solid;
+    opacity:0.8;
+    z-index:10;
+    pointer-events:none;
+  }
+  .feed-body::before{top:16px;left:16px;border-width:2px 0 0 2px;}
+  .feed-body::after{bottom:16px;right:16px;border-width:0 2px 2px 0;}
+
+  .feed-msg{color:var(--text-dim);font-size:13px;text-align:center;line-height:1.6;}
+  .feed-msg strong{display:block;color:var(--text);font-size:14px;margin-bottom:4px;}
+
+  .feed-wrap{position:relative;width:100%;height:100%;display:flex;align-items:center;justify-content:center;}
+  .feed-wrap img, .feed-wrap video{
+    width:100%;height:100%;object-fit:contain;display:block;
+  }
+
+  .scan-banner{
+    position:absolute;
+    top:14px;
+    left:50%;
+    transform:translateX(-50%);
+    background:rgba(21,128,61,0.92);
+    color:#fff;
+    font-size:12px;
+    font-weight:600;
+    padding:5px 14px;
+    border-radius:20px;
+    z-index:25;
+    pointer-events:none;
+    display:flex;
+    align-items:center;
+    gap:6px;
+    box-shadow:0 4px 12px rgba(0,0,0,0.15);
+  }
+
+  .det-box{
+    position:absolute;border:2px solid var(--blue);border-radius:3px;
+    pointer-events:none;z-index:15;
+    transition: left 0.08s ease-out, top 0.08s ease-out, width 0.08s ease-out, height 0.08s ease-out;
+  }
+  .det-box.plate-box{border-color:#f2c94c;border-width:2.5px;box-shadow: 0 0 10px rgba(242, 201, 76, 0.45);}
+  .det-box.stationary-locked{border-color:#10b981 !important;border-width:3px !important;box-shadow:0 0 16px rgba(16,185,129,0.7) !important;}
+  .det-box.stationary-locked .det-label{background:#10b981 !important;}
+  .det-label{
+    position:absolute;top:-22px;left:-2px;
+    background:var(--blue);color:#fff;
+    font-size:11px;font-weight:600;
+    padding:2px 6px;border-radius:4px;white-space:nowrap;
+  }
+  @keyframes box-pop{from{opacity:0;transform:scale(0.98);}to{opacity:1;transform:scale(1);}}
+
+  .side{display:flex;flex-direction:column;gap:20px;}
+
+  .result-head{
+    padding:14px 18px;
+    border-bottom:1px solid var(--line);
+    font-size:14px;font-weight:600;color:var(--text);
+  }
+  .result-body{padding:18px 18px 20px;}
+  .vehicle-capture-box {
+    position: relative;
+    width: 100%;
+    height: 148px;
+    background: #0f172a;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 14px;
+    box-shadow: inset 0 2px 6px rgba(0,0,0,0.2);
+  }
+  .vehicle-capture-box img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .capture-placeholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 7px;
+    color: #94a3b8;
+    font-size: 11px;
+    font-weight: 500;
+  }
+  .capture-badge {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    background: rgba(15, 23, 42, 0.85);
+    backdrop-filter: blur(4px);
+    color: #10b981;
+    border: 1px solid rgba(16, 185, 129, 0.4);
+    font-size: 10px;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    letter-spacing: 0.5px;
+  }
+  .capture-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #10b981;
+    box-shadow: 0 0 6px #10b981;
+    animation: pulse 1.2s infinite;
+  }
+  .tags{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;}
+  .tag{
+    font-size:12px;padding:4px 10px;border-radius:100px;
+    background:var(--panel-2);border:1px solid var(--line);color:var(--text-dim);
+  }
+  .tag.on{color:var(--accent);border-color:var(--accent-dim);background:rgba(21,128,61,0.08);font-weight:600;}
+  .tag.warn{color:#d97706;border-color:#fde68a;background:rgba(245,158,11,0.08);font-weight:600;}
+  .tag.locked{color:#059669;border-color:#a7f3d0;background:rgba(16,185,129,0.14);font-weight:700;}
+  .pct{color:var(--accent);font-weight:600;}
+
+  .plate{
+    display:inline-block;
+    font-family:'IBM Plex Mono',monospace;
+    font-weight:700;
+    font-size:28px;
+    letter-spacing:2px;
+    background:#f2c94c;
+    color:#1a1a1a;
+    padding:10px 18px;
+    border-radius:6px;
+    margin-bottom:14px;
+    box-shadow:0 2px 6px rgba(0,0,0,0.06);
+    transition: all 0.2s ease;
+  }
+  .plate.approaching{
+    background:#f1f5f9;
+    color:#64748b;
+    border:1px dashed #cbd5e1;
+    font-size:17px;
+    letter-spacing:0.5px;
+    font-weight:600;
+  }
+  .meta{font-size:12px;color:var(--text-dim);display:flex;justify-content:space-between;margin-bottom:14px;}
+
+  .share-btn{
+    font-family:'IBM Plex Sans',sans-serif;
+    font-size:12px;
+    font-weight:600;
+    color:var(--blue);
+    background:rgba(47,111,237,0.08);
+    border:1px solid rgba(47,111,237,0.25);
+    border-radius:6px;
+    padding:8px 12px;
+    cursor:pointer;
+    width:100%;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:6px;
+    transition:all 0.15s;
+  }
+  .share-btn:hover{background:rgba(47,111,237,0.16);}
+
+  .log-head{
+    padding:12px 18px;
+    border-bottom:1px solid var(--line);
+    font-size:14px;font-weight:600;color:var(--text);
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+  }
+  .export-btn{
+    font-family:'IBM Plex Sans',sans-serif;
+    font-size:11px;
+    font-weight:600;
+    color:var(--text);
+    background:var(--panel-2);
+    border:1px solid var(--line);
+    border-radius:5px;
+    padding:4px 9px;
+    cursor:pointer;
+    display:flex;
+    align-items:center;
+    gap:4px;
+    transition:all 0.15s;
+  }
+  .export-btn:hover{background:#e2e6ec;color:var(--blue);}
+
+  .log-container{max-height:280px;overflow-y:auto;}
+  .log-row{
+    display:grid;
+    grid-template-columns:70px 1fr auto;
+    gap:12px;
+    align-items:center;
+    padding:11px 18px;
+    border-bottom:1px solid var(--line);
+    font-size:13px;
+    transition:background 0.15s;
+  }
+  .log-row:hover{background:#f9fafb;}
+  .log-row:last-child{border-bottom:none;}
+  .log-time{color:var(--text-dim);font-family:'IBM Plex Mono',monospace;font-size:11px;}
+  .log-plate{font-family:'IBM Plex Mono',monospace;font-weight:700;letter-spacing:0.5px;}
+  .log-type{color:var(--text-dim);font-size:12px;text-align:right;}
+
+  /* Toast Notification */
+  .toast{
+    position:fixed;
+    bottom:24px;
+    right:24px;
+    background:#1a1d23;
+    color:#fff;
+    font-size:13px;
+    font-weight:500;
+    padding:10px 18px;
+    border-radius:8px;
+    box-shadow:0 8px 24px rgba(0,0,0,0.2);
+    z-index:9999;
+    opacity:0;
+    transform:translateY(12px);
+    transition:all 0.25s ease;
+    pointer-events:none;
+  }
+  .toast.show{opacity:1;transform:translateY(0);}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <svg width="34" height="34" viewBox="0 0 34 34" fill="none">
+      <circle cx="17" cy="17" r="16" stroke="#2f6fed" stroke-width="1.4"/>
+      <circle cx="17" cy="17" r="10" stroke="#2f6fed" stroke-width="1.4" opacity="0.6"/>
+      <circle cx="17" cy="17" r="3" fill="#2f6fed"/>
+    </svg>
+    <div>
+      <h1>Parkour ANPR</h1>
+      <span>Gate Monitoring &middot; Real-Time Entry Point 01</span>
+    </div>
+  </div>
+  <div class="clock">
+    <div class="time" id="clockTime">--:--:--</div>
+    <div class="date" id="clockDate">-</div>
+  </div>
+</header>
+
+<div class="layout">
+  <!-- LEFT SIDE: LIVE FEED -->
+  <div class="card">
+    <div class="feed-head">
+      <div class="feed-head-left">
+        <h2>Live Feed</h2>
+        <select id="camSourceSelect" class="source-select" onchange="switchCamSource()">
+          <option value="rpi_kit" selected>Raspberry Pi ALPR Kit (:5000)</option>
+          <option value="rpi_stream">Raspberry Pi Stream (:8080)</option>
+          <option value="droidcam_stream">DroidCam IP Stream (:4747)</option>
+          <option value="hikvision_isapi">Hikvision CCTV / NVR (ISAPI API)</option>
+          <option value="cctv_rtsp">CCTV IP Camera (RTSP)</option>
+          <option value="zerotier_stream">Server Parkir ZeroTier (:54321)</option>
+          <option value="video_file">File Video (MP4 / AVI / CCTV Clip)</option>
+          <option value="webcam">Webcam / DroidCam PC</option>
+        </select>
+        <select id="videoDeviceSelect" class="source-select" style="display:none; max-width:200px;" onchange="switchVideoDevice()"></select>
+      </div>
+      <div class="feed-head-actions">
+        <!-- RPi ALPR Kit Actions -->
+        <button class="ctrl-btn secondary" id="btnRpiCapture" onclick="triggerRpiKitCapture()">Capture & Scan</button>
+        <button class="ctrl-btn outline" id="btnRpiPing" onclick="testRpiPing()">Ping</button>
+
+        <!-- Webcam/Stream/Video Actions -->
+        <button class="ctrl-btn" id="btnConnectCam" style="display:none;" onclick="toggleCamera()">Connect</button>
+        <button class="ctrl-btn secondary" id="btnScanNow" style="display:none;" onclick="scanCurrentFrame()">Scan Plate</button>
+        <label class="auto-scan-wrap" id="autoScanWrap" style="display:none;">
+          <input type="checkbox" id="chkAutoScan" onchange="toggleAutoScan()">
+          <span>Auto-Scan</span>
+        </label>
+
+        <!-- Upload Buttons (Video & Photo) -->
+        <button class="upload-btn" id="uploadVideoBtn" onclick="document.getElementById('videoFileInput').click()" style="background:#f1f5f9; border-color:#cbd5e1; font-weight:600; display:inline-flex; align-items:center; gap:4px;" title="Pilih video rekaman mobil atau CCTV untuk dipindai otomatis">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+          Upload Video
+        </button>
+        <input type="file" id="videoFileInput" accept="video/*,.mp4,.avi,.mov,.mkv,.webm" style="display:none;">
+
+        <button class="upload-btn" id="uploadBtn" onclick="document.getElementById('fileInput').click()">Upload Photo</button>
+        <input type="file" id="fileInput" accept="image/*" style="display:none;">
+        
+        <div class="live-pill" id="liveIndicator">
+          <span class="dot" id="liveDot"></span>
+          <span id="liveStatusText">KIT READY</span>
+        </div>
+        <div class="live-pill" id="aiIndicator" style="display:none; background:rgba(47,111,237,0.09); border-color:#b9d2fd; color:var(--blue);">
+          <span class="dot" id="aiDot" style="background:var(--blue); animation:pulse 1s infinite;"></span>
+          <span id="aiStatusText">AI ACTIVE</span>
+        </div>
+        <div class="live-pill" id="latencyPill" style="display:none; background:rgba(16,185,129,0.09); border-color:#a7f3d0; color:#059669; font-weight:600;" title="Real-time detection speed / inference latency">
+          <span class="dot" id="latencyDot" style="background:#10b981;"></span>
+          <span id="latencyText">0 ms</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- VIDEO FILE DEDICATED CONFIG BAR -->
+    <div id="videoConfigBar" class="rpi-url-bar" style="display:none; flex-wrap:wrap; gap:10px; align-items:center; background:#f8fafc; border-bottom:1px solid var(--line); padding:9px 16px;">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span style="font-weight:600; font-size:12px; color:var(--text);">Mode Video:</span>
+        <button type="button" class="upload-btn" onclick="document.getElementById('videoFileInput').click()" style="padding:5px 11px; font-size:12px; display:inline-flex; align-items:center; gap:5px; font-weight:600;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          Pilih Video dari Laptop
+        </button>
+        <button type="button" class="ctrl-btn secondary" onclick="loadSampleVideo()" style="padding:5px 11px; font-size:12px; display:inline-flex; align-items:center; gap:5px;">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Putar Video Sampel (Demo Mobil)
+        </button>
+      </div>
+      <div id="videoSpeedControl" style="display:none; align-items:center; gap:6px; margin-left:auto;">
+        <label style="font-size:12px; color:var(--text-dim); font-weight:500;">Speed:</label>
+        <select id="videoSpeedSelect" class="source-select" style="padding:3px 8px; font-size:11px;" onchange="setVideoSpeed(this.value)">
+          <option value="0.5">0.5x (Slow Mo)</option>
+          <option value="1.0" selected>1.0x (Normal)</option>
+          <option value="1.5">1.5x</option>
+          <option value="2.0">2.0x</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- RASPBERRY PI URL CONFIG BAR -->
+    <div id="rpiUrlBar" class="rpi-url-bar">
+      <label id="rpiUrlLabel" for="rpiUrlInput">ALPR Kit URL:</label>
+      <input type="text" id="rpiUrlInput" value="http://192.168.1.4:5000" placeholder="http://192.168.1.4:5000">
+    </div>
+
+    <!-- HIKVISION ISAPI DEDICATED CONFIG BAR -->
+    <div id="isapiConfigBar" class="rpi-url-bar" style="display:none; flex-wrap:wrap; gap:10px; align-items:center; background:#f8fafc; border-bottom:1px solid var(--line); padding:9px 16px;">
+      <div style="display:flex; align-items:center; gap:6px;">
+        <label style="font-weight:600; font-size:12px; color:var(--text);" for="isapiIpInput">IP CCTV:</label>
+        <input type="text" id="isapiIpInput" value="192.168.110.64" style="width:130px; font-size:12px; padding:5px 8px; border:1px solid #cbd5e1; border-radius:5px;" placeholder="192.168.110.64">
+      </div>
+      <div style="display:flex; align-items:center; gap:6px;">
+        <label style="font-weight:600; font-size:12px; color:var(--text);" for="isapiUserInput">User:</label>
+        <input type="text" id="isapiUserInput" value="admin" style="width:75px; font-size:12px; padding:5px 8px; border:1px solid #cbd5e1; border-radius:5px;" placeholder="admin">
+      </div>
+      <div style="display:flex; align-items:center; gap:6px;">
+        <label style="font-weight:600; font-size:12px; color:var(--text);" for="isapiPassInput">Password:</label>
+        <input type="password" id="isapiPassInput" value="Mddcoid*" style="width:140px; font-size:12px; padding:5px 8px; border:1px solid #cbd5e1; border-radius:5px;" placeholder="Password CCTV">
+        <button type="button" id="btnTogglePass" onclick="toggleIsapiPassword()" style="background:#e2e8f0; border:1px solid #cbd5e1; border-radius:5px; padding:5px 8px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; color:#475569;" title="Lihat / Sembunyikan Password">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        </button>
+      </div>
+      <div style="display:flex; align-items:center; gap:6px;">
+        <label style="font-weight:600; font-size:12px; color:var(--text);" for="isapiChannelInput">Channel:</label>
+        <input type="text" id="isapiChannelInput" value="101" style="width:45px; font-size:12px; padding:5px 6px; border:1px solid #cbd5e1; border-radius:5px; text-align:center;" placeholder="101">
+      </div>
+    </div>
+
+    <div class="feed-body" id="feedBody">
+      <div class="feed-msg" id="placeholderMsg">
+        <strong>Raspberry Pi ALPR Kit Ready</strong>
+        Click <strong>"Capture & Scan"</strong> to trigger camera capture, or switch source to Webcam/Upload
+      </div>
+      <!-- Hidden Canvas for Snapshot Capture -->
+      <canvas id="captureCanvas" style="display:none;"></canvas>
+    </div>
+  </div>
+
+  <!-- RIGHT SIDE: RESULT & HISTORY -->
+  <div class="side">
+    <!-- LATEST DETECTION RESULT CARD -->
+    <div class="card">
+      <div class="result-head">Latest Detection</div>
+      <div class="result-body" id="resultBody">
+        <!-- FOTO CAPTURE KENDARAAN DI GERBANG (SNAP / AUTO-TRIGGER) -->
+        <div class="vehicle-capture-box" id="vehicleCaptureBox">
+          <img id="vehicleCaptureImg" src="" alt="Capture Kendaraan" style="display:none;">
+          <div class="capture-placeholder" id="capturePlaceholder">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+            <span>Foto Kendaraan di Gerbang</span>
+          </div>
+          <div class="capture-badge" id="captureBadge" style="display:none;">
+            <span class="capture-dot"></span>
+            <span id="captureBadgeText">GATE CAPTURE</span>
+          </div>
+        </div>
+
+        <div class="tags">
+          <span class="tag on" id="tagVehicle">-</span>
+          <span class="tag" id="tagBodyStyle">-</span>
+          <span class="tag" id="tagGateStatus" style="display:none; color:#059669; border-color:#a7f3d0; background:rgba(16,185,129,0.12); font-weight:700;">GATE STOP</span>
+        </div>
+        <div class="plate" id="plateText">-</div>
+        <div class="meta">
+          <span>Confidence <span class="pct" id="pctConf">-</span></span>
+          <span>Latency <span class="pct" id="pctLatency" style="color:#10b981; font-weight:700;">-</span></span>
+          <span id="detTime">-</span>
+        </div>
+        <button class="share-btn" id="btnShare" onclick="shareDetection()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+          Share / Copy Entry Info
+        </button>
+      </div>
+    </div>
+
+    <!-- ENTRY HISTORY CARD (PERSISTENT DATABASE) -->
+    <div class="card">
+      <div class="log-head">
+        <span>Entry History</span>
+        <button class="export-btn" onclick="exportCSV()" title="Download history report in Excel/CSV format">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Export CSV
+        </button>
+      </div>
+      <div class="log-container" id="logList">
+        <!-- History rows loaded automatically from database -->
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toastMsg">Info copied successfully!</div>
+
+<script>
+// ============================================================
+// REAL-TIME CLOCK & DATE (ENGLISH)
+// ============================================================
+function updateClock(){
+  const now = new Date();
+  const hh = String(now.getHours()).padStart(2,'0');
+  const mm = String(now.getMinutes()).padStart(2,'0');
+  const ss = String(now.getSeconds()).padStart(2,'0');
+  document.getElementById('clockTime').textContent = `${hh}:${mm}:${ss}`;
+  const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  document.getElementById('clockDate').textContent = `${days[now.getDay()]}, ${now.getDate()} ${months[now.getMonth()]} ${now.getFullYear()}`;
+}
+updateClock();
+setInterval(updateClock, 1000);
+
+// ============================================================
+// GLOBAL STATE & VARIABLES
+// ============================================================
+const HOST = (window.location.hostname && window.location.hostname !== 'localhost') ? window.location.hostname : '127.0.0.1';
+const API_URL = `http://${HOST}:5001/api/detect`;
+const RPI_CAPTURE_URL = `http://${HOST}:5001/api/rpi/capture`;
+const STREAM_CAPTURE_URL = `http://${HOST}:5001/api/stream/capture`;
+const RPI_PING_URL = `http://${HOST}:5001/api/rpi/ping`;
+const HISTORY_URL = `http://${HOST}:5001/api/history`;
+const EXPORT_URL = `http://${HOST}:5001/api/export`;
+const LIVE_STREAM_URL = `http://${HOST}:5001/api/live_stream`;
+const STREAM_START_URL = `http://${HOST}:5001/api/stream/start`;
+const STREAM_STOP_URL = `http://${HOST}:5001/api/stream/stop`;
+const STREAM_STATUS_URL = `http://${HOST}:5001/api/stream/status`;
+const DETECT_CURRENT_URL = `http://${HOST}:5001/api/detect_current`;
+const VIDEO_UPLOAD_URL = `http://${HOST}:5001/api/video/upload`;
+const VIDEO_SAMPLE_URL = `http://${HOST}:5001/api/video/sample`;
+const typeLabel = {car: "Mobil", motorcycle: "Motor", bus: "Bus", truck: "Truk"};
+
+let isCameraConnected = false;
+let currentMediaStream = null;
+let isScanning = false;
+let lastDetectionData = null;
+let isContinuousDetectActive = false;
+let lastLoggedPlate = "";
+let lastLoggedTime = 0;
+let consecutiveEmptyCycles = 0;
+let fpsPollTimer = null;
+let lastBoxCenter = null;
+let stationaryFrameCount = 0;
+let isVehicleStationary = false;
+
+// ============================================================
+// SWITCH CAMERA SOURCE (RPi ALPR Kit vs RPi Stream vs Webcam)
+// ============================================================
+function switchCamSource(){
+  const src = document.getElementById('camSourceSelect').value;
+  const urlBar = document.getElementById('rpiUrlBar');
+  const urlLabel = document.getElementById('rpiUrlLabel');
+  const urlInput = document.getElementById('rpiUrlInput');
+  const btnRpiCapture = document.getElementById('btnRpiCapture');
+  const btnRpiPing = document.getElementById('btnRpiPing');
+  const btnConnectCam = document.getElementById('btnConnectCam');
+  const btnScanNow = document.getElementById('btnScanNow');
+  const autoScanWrap = document.getElementById('autoScanWrap');
+  const placeholderMsg = document.getElementById('placeholderMsg');
+  const isapiBar = document.getElementById('isapiConfigBar');
+  const videoBar = document.getElementById('videoConfigBar');
+
+  if (isCameraConnected){
+    toggleCamera(); // Disconnect if currently running
+  }
+  if (isapiBar) isapiBar.style.display = 'none';
+  if (videoBar) videoBar.style.display = 'none';
+
+  if (src === 'rpi_kit'){
+    urlBar.style.display = 'flex';
+    urlLabel.textContent = "ALPR Kit URL:";
+    urlInput.value = "http://192.168.1.4:5000";
+    btnRpiCapture.style.display = 'inline-flex';
+    btnRpiPing.style.display = 'inline-flex';
+    btnConnectCam.style.display = 'none';
+    btnScanNow.style.display = 'none';
+    autoScanWrap.style.display = 'none';
+    updateLiveIndicator(true, "KIT READY");
+    if (placeholderMsg){
+      placeholderMsg.innerHTML = `<strong>Raspberry Pi ALPR Kit Ready</strong>Click <strong>"Capture & Scan"</strong> to trigger camera capture, or switch source to Webcam/Upload`;
+    }
+  } else if (src === 'rpi_stream'){
+    urlBar.style.display = 'flex';
+    urlLabel.textContent = "RPi Stream URL:";
+    urlInput.value = "http://192.168.1.4:8080/video_feed";
+    urlInput.placeholder = "http://192.168.1.4:8080/video_feed";
+    btnRpiCapture.style.display = 'none';
+    btnRpiPing.style.display = 'none';
+    btnConnectCam.style.display = 'inline-flex';
+    btnScanNow.style.display = 'none';
+    autoScanWrap.style.display = 'none';
+    updateLiveIndicator(false, "OFFLINE");
+    if (placeholderMsg){
+      placeholderMsg.innerHTML = `<strong>Waiting for stream connection</strong>Enter your stream URL and click "Connect"`;
+    }
+  } else if (src === 'droidcam_stream'){
+    urlBar.style.display = 'flex';
+    urlLabel.textContent = "DroidCam URL:";
+    urlInput.value = "http://192.168.110.76:4747/video";
+    urlInput.placeholder = "http://192.168.110.76:4747/video";
+    btnRpiCapture.style.display = 'none';
+    btnRpiPing.style.display = 'none';
+    btnConnectCam.style.display = 'inline-flex';
+    btnScanNow.style.display = 'none';
+    autoScanWrap.style.display = 'none';
+    updateLiveIndicator(false, "OFFLINE");
+    if (placeholderMsg){
+      placeholderMsg.innerHTML = `<strong>DroidCam IP Stream Ready</strong>Enter your DroidCam URL (e.g. http://192.168.110.76:4747/video) and click "Connect"`;
+    }
+  } else if (src === 'hikvision_isapi'){
+    urlBar.style.display = 'none';
+    if (isapiBar) isapiBar.style.display = 'flex';
+    btnRpiCapture.style.display = 'none';
+    btnRpiPing.style.display = 'none';
+    btnConnectCam.style.display = 'inline-flex';
+    btnConnectCam.textContent = "Connect";
+    btnConnectCam.className = "ctrl-btn";
+    btnScanNow.style.display = 'none';
+    autoScanWrap.style.display = 'none';
+    updateLiveIndicator(false, "OFFLINE");
+    if (placeholderMsg){
+      placeholderMsg.innerHTML = `<strong>Hikvision CCTV Ready</strong><br>IP: <code>192.168.110.64</code> | User: <code>admin</code><br>Pastikan Password CCTV benar lalu klik tombol hijau <strong>"Connect"</strong>`;
+    }
+  } else if (src === 'cctv_rtsp'){
+    if (isapiBar) isapiBar.style.display = 'none';
+    urlBar.style.display = 'flex';
+    urlLabel.textContent = "CCTV RTSP URL:";
+    urlInput.value = "rtsp://admin:Mddcoid*@192.168.110.64:554/Streaming/Channels/101";
+    urlInput.placeholder = "rtsp://admin:Mddcoid*@192.168.110.64:554/Streaming/Channels/101";
+    btnRpiCapture.style.display = 'none';
+    btnRpiPing.style.display = 'none';
+    btnConnectCam.style.display = 'inline-flex';
+    btnConnectCam.textContent = "Connect";
+    btnConnectCam.className = "ctrl-btn";
+    btnScanNow.style.display = 'none';
+    autoScanWrap.style.display = 'none';
+    updateLiveIndicator(false, "OFFLINE");
+    if (placeholderMsg){
+      placeholderMsg.innerHTML = `<strong>CCTV IP Camera (RTSP) Ready</strong><br>URL: <code>rtsp://admin:Mddcoid*@192.168.110.64:554/Streaming/Channels/101</code><br>Klik tombol hijau <strong>"Connect"</strong> untuk membuka live feed ultra-smooth dan deteksi otomatis.`;
+    }
+  } else if (src === 'zerotier_stream'){
+    if (isapiBar) isapiBar.style.display = 'none';
+    urlBar.style.display = 'flex';
+    urlLabel.textContent = "Server ZeroTier URL:";
+    urlInput.value = "http://172.30.61.172:54321/stream/player/172.16.90.31";
+    urlInput.placeholder = "http://172.30.61.172:54321/stream/player/172.16.90.31";
+    btnRpiCapture.style.display = 'none';
+    btnRpiPing.style.display = 'none';
+    btnConnectCam.style.display = 'inline-flex';
+    btnConnectCam.textContent = "Connect";
+    btnConnectCam.className = "ctrl-btn";
+    btnScanNow.style.display = 'none';
+    autoScanWrap.style.display = 'none';
+    updateLiveIndicator(false, "OFFLINE");
+    if (placeholderMsg){
+      placeholderMsg.innerHTML = `<strong>Server Parkir ZeroTier Ready</strong><br>Stream: <code>http://172.30.61.172:54321/stream/player/172.16.90.31</code><br>Pastikan ZeroTier di laptop sudah terhubung ke jaringan, lalu klik <strong>"Connect"</strong>.`;
+    }
+  } else if (src === 'video_file'){
+    urlBar.style.display = 'none';
+    if (videoBar) videoBar.style.display = 'flex';
+    btnRpiCapture.style.display = 'none';
+    btnRpiPing.style.display = 'none';
+    btnConnectCam.style.display = 'inline-flex';
+    btnConnectCam.textContent = "Pilih Video";
+    btnConnectCam.className = "ctrl-btn";
+    btnScanNow.style.display = 'inline-flex';
+    autoScanWrap.style.display = 'inline-flex';
+    updateLiveIndicator(false, "VIDEO SIAP");
+    if (placeholderMsg){
+      placeholderMsg.innerHTML = `<strong>Mode Pemutaran Video ANPR</strong><br>Pilih file video mobil dari laptop Anda atau klik tombol biru <strong>"Putar Video Sampel (Demo Mobil)"</strong> di atas untuk memutar video dan memindai plat secara otomatis.`;
+    }
+  } else {
+    // Webcam Laptop / DroidCam
+    urlBar.style.display = 'none';
+    btnRpiCapture.style.display = 'none';
+    btnRpiPing.style.display = 'none';
+    btnConnectCam.style.display = 'inline-flex';
+    btnScanNow.style.display = 'none';
+    autoScanWrap.style.display = 'none';
+    updateLiveIndicator(false, "OFFLINE");
+    if (placeholderMsg){
+      placeholderMsg.innerHTML = `<strong>Webcam / DroidCam Ready</strong>Select your camera device and click "Connect"`;
+    }
+    populateVideoDevices();
+  }
+
+  if (src !== 'webcam'){
+    document.getElementById('videoDeviceSelect').style.display = 'none';
+  }
+}
+
+function toggleIsapiPassword(){
+  const inp = document.getElementById('isapiPassInput');
+  const btn = document.getElementById('btnTogglePass');
+  if (inp.type === 'password'){
+    inp.type = 'text';
+    btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>`;
+  } else {
+    inp.type = 'password';
+    btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
+  }
+}
+
+// Populate available video input devices (Built-in Webcam vs DroidCam Source 3 vs DroidCam Source 2)
+async function populateVideoDevices(){
+  const sel = document.getElementById('videoDeviceSelect');
+  if (!sel) return;
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const videoInputs = devices.filter(d => d.kind === 'videoinput');
+    if (videoInputs.length === 0){
+      sel.style.display = 'none';
+      return;
+    }
+    sel.innerHTML = '';
+    let droidCamIndex = -1;
+    videoInputs.forEach((d, idx) => {
+      const opt = document.createElement('option');
+      opt.value = d.deviceId;
+      opt.textContent = d.label || `Camera ${idx + 1}`;
+      // Utamakan DroidCam Source 3 karena paling kompatibel dengan browser Chromium
+      if (d.label && d.label.toLowerCase().includes('droidcam source 3')){
+        opt.selected = true;
+        droidCamIndex = idx;
+      } else if (d.label && d.label.toLowerCase().includes('droidcam') && droidCamIndex === -1){
+        opt.selected = true;
+        droidCamIndex = idx;
+      }
+      sel.appendChild(opt);
+    });
+    sel.style.display = 'inline-block';
+  } catch(e){
+    console.warn("Error enumerating devices:", e);
+  }
+}
+
+async function switchVideoDevice(){
+  if (isCameraConnected){
+    await toggleCamera();
+    await toggleCamera();
+  }
+}
+
+// ============================================================
+// TRIGGER RASPBERRY PI ALPR KIT CAPTURE & RECOGNITION
+// ============================================================
+async function triggerRpiKitCapture(){
+  if (isScanning) return;
+  const rpiUrl = document.getElementById('rpiUrlInput').value.trim();
+  if (!rpiUrl){
+    alert("Please enter the ALPR Kit URL!");
+    return;
+  }
+
+  const btn = document.getElementById('btnRpiCapture');
+  btn.disabled = true;
+  btn.textContent = "Capturing...";
+  isScanning = true;
+  showScanBanner(true, "Triggering RPi Camera...");
+
+  try {
+    const resp = await fetch(RPI_CAPTURE_URL, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ rpi_url: rpiUrl })
+    });
+
+    const data = await resp.json();
+    if (!resp.ok){
+      throw new Error(data.error || `Server error: ${resp.status}`);
+    }
+
+    // Display the newly captured frame in feed body
+    const feedBody = document.getElementById('feedBody');
+    const imgUrl = data.image_url ? `http://localhost:5001${data.image_url}` : "http://localhost:5001/captures/temp_upload.jpg?" + new Date().getTime();
+    feedBody.innerHTML = `<div class="feed-wrap"><img id="feedImg" src="${imgUrl}"></div><canvas id="captureCanvas" style="display:none;"></canvas>`;
+
+    if (data.detections && data.detections.length > 0){
+      const det = data.detections[0];
+      lastDetectionData = det;
+      drawBoxes(det);
+      updateResultCard(det);
+      addLogRow(det);
+      showToast(`Plate detected: ${det.license_plate || 'Vehicle'}`);
+    } else {
+      showToast("Photo captured, but no vehicle detected.");
+    }
+
+  } catch(err){
+    alert("ALPR Kit Error:\n" + err.message);
+  } finally {
+    isScanning = false;
+    showScanBanner(false);
+    btn.disabled = false;
+    btn.textContent = "Capture & Scan";
+  }
+}
+
+// Test Connection Ping to RPi
+async function testRpiPing(){
+  const rpiUrl = document.getElementById('rpiUrlInput').value.trim();
+  const btn = document.getElementById('btnRpiPing');
+  btn.disabled = true;
+  btn.textContent = "Testing...";
+  try {
+    const resp = await fetch(`${RPI_PING_URL}?rpi_url=${encodeURIComponent(rpiUrl)}`);
+    const data = await resp.json();
+    if (data.status === "online"){
+      showToast(`Raspberry Pi is ONLINE (HTTP ${data.code})`);
+      updateLiveIndicator(true, "ONLINE");
+    } else {
+      alert(`Could not connect to Raspberry Pi at ${rpiUrl}.\n\nMake sure the Raspberry Pi is turned on and connected to the same WiFi.`);
+      updateLiveIndicator(false, "OFFLINE");
+    }
+  } catch(e){
+    alert("Connection test failed: " + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Ping";
+  }
+}
+
+// ============================================================
+// CONNECT / DISCONNECT WEBCAM OR MJPEG STREAM
+// ============================================================
+async function toggleCamera(){
+  const btn = document.getElementById('btnConnectCam');
+  const src = document.getElementById('camSourceSelect').value;
+  const feedBody = document.getElementById('feedBody');
+
+  if (document.pictureInPictureElement) {
+    document.exitPictureInPicture().catch(() => {});
+  }
+
+  if (isCameraConnected){
+    // Disconnect camera or video
+    stopFpsMonitor();
+    stopContinuousAutoDetect();
+    stopAutonomousGateMonitor();
+    stopCameraStream();
+    const liveVid = document.getElementById('liveVideo');
+    if (liveVid){
+      liveVid.pause();
+      liveVid.src = "";
+    }
+    const spd = document.getElementById('videoSpeedControl');
+    if (spd) spd.style.display = 'none';
+
+    if (src !== 'webcam' && src !== 'video_file'){
+      fetch(STREAM_STOP_URL, { method: "POST" }).catch(() => {});
+    }
+    btn.textContent = (src === 'video_file') ? "Pilih Video" : "Connect";
+    btn.className = "ctrl-btn";
+    document.getElementById('btnScanNow').style.display = (src === 'video_file') ? "inline-flex" : "none";
+    document.getElementById('autoScanWrap').style.display = (src === 'video_file') ? "inline-flex" : "none";
+    document.getElementById('chkAutoScan').checked = false;
+    updateLiveIndicator(false, (src === 'video_file') ? "VIDEO BERHENTI" : "OFFLINE");
+    updateLatencyIndicator(0);
+    feedBody.innerHTML = `
+      <div class="feed-msg">
+        <strong>${src === 'video_file' ? 'Video dihentikan' : 'Camera disconnected'}</strong>
+        ${src === 'video_file' ? 'Pilih video baru atau klik tombol Putar Video Sampel' : 'Click "Connect" to start the stream again'}
+      </div>
+      <canvas id="captureCanvas" style="display:none;"></canvas>
+    `;
+    isCameraConnected = false;
+    return;
+  }
+
+  // Connect Video File
+  if (src === 'video_file'){
+    document.getElementById('videoFileInput').click();
+    return;
+  }
+
+  // Connect camera
+  if (src === 'webcam'){
+    try {
+      const devSelect = document.getElementById('videoDeviceSelect');
+      const chosenId = devSelect && devSelect.value ? devSelect.value : null;
+      const videoConstraints = chosenId
+        ? { deviceId: { exact: chosenId }, width: { ideal: 1280 }, height: { ideal: 720 } }
+        : { width: { ideal: 1280 }, height: { ideal: 720 } };
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: videoConstraints
+      });
+      currentMediaStream = stream;
+      feedBody.innerHTML = `
+        <div class="feed-wrap">
+          <video id="liveVideo" autoplay playsinline muted disablePictureInPicture></video>
+        </div>
+        <canvas id="captureCanvas" style="display:none;"></canvas>
+      `;
+      const video = document.getElementById('liveVideo');
+      video.srcObject = stream;
+      isCameraConnected = true;
+      btn.textContent = "Disconnect";
+      btn.className = "ctrl-btn danger";
+      document.getElementById('btnScanNow').style.display = "inline-flex";
+      document.getElementById('autoScanWrap').style.display = "inline-flex";
+      updateLiveIndicator(true, "LIVE");
+      showToast("Webcam connected - Auto-detect aktif!");
+
+      // Mulai deteksi otomatis seketika tanpa perlu klik manual
+      startContinuousAutoDetect();
+
+      // Refresh list perangkat setelah izin kamera diberikan
+      populateVideoDevices();
+    } catch(err){
+      alert("Failed to open camera: " + err.message);
+    }
+  } else if (src === 'hikvision_isapi'){
+    // Mode Hikvision CCTV (Koneksi Persistent RTSP 25 FPS di latar belakang)
+    const ip = document.getElementById('isapiIpInput').value.trim() || '192.168.110.64';
+    const user = document.getElementById('isapiUserInput').value.trim() || 'admin';
+    const pass = document.getElementById('isapiPassInput').value.trim();
+    const ch = document.getElementById('isapiChannelInput').value.trim() || '1';
+
+    if (!pass){
+      alert("Silakan ketik Password kamera CCTV pada kolom Password!");
+      document.getElementById('isapiPassInput').focus();
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = "Connecting...";
+    try {
+      const streamUrl = `http://${ip}/ISAPI/Streaming/channels/${ch}/picture`;
+      const resp = await fetch(STREAM_START_URL, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          stream_url: streamUrl,
+          username: user,
+          password: pass
+        })
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || "Gagal menghubungkan ke kamera CCTV");
+
+      // Set live feed ke stream MJPEG real-time 25 FPS
+      feedBody.innerHTML = `
+        <div class="feed-wrap">
+          <img id="liveStreamImg" src="${LIVE_STREAM_URL}?t=${Date.now()}" crossorigin="anonymous" alt="Hikvision Live Feed">
+        </div>
+        <canvas id="captureCanvas" style="display:none;"></canvas>
+      `;
+      isCameraConnected = true;
+      btn.textContent = "Disconnect";
+      btn.className = "ctrl-btn danger";
+      document.getElementById('btnScanNow').style.display = "inline-flex";
+      document.getElementById('autoScanWrap').style.display = "inline-flex";
+      updateLiveIndicator(true, "LIVE (Smooth)");
+      startFpsMonitor();
+      showToast("CCTV Hikvision Connected - Auto-detect aktif!");
+
+      // Mulai deteksi otomatis seketika tanpa perlu klik manual
+      startContinuousAutoDetect();
+    } catch(err){
+      alert("Koneksi CCTV Gagal: " + err.message);
+      updateLiveIndicator(false, "ERROR");
+    } finally {
+      btn.disabled = false;
+    }
+  } else {
+    // Mode CCTV RTSP, DroidCam, atau Raspberry Pi Stream
+    let rpiUrl = document.getElementById('rpiUrlInput').value.trim();
+    if (!rpiUrl){
+      alert("Please enter the Stream URL first!");
+      return;
+    }
+
+    // Auto-koreksi jika placeholder PASSWORD_ANDA belum diganti
+    if (rpiUrl.includes("PASSWORD_ANDA")){
+      rpiUrl = rpiUrl.replace("PASSWORD_ANDA", "Mddcoid*");
+      document.getElementById('rpiUrlInput').value = rpiUrl;
+    }
+    // Auto-koreksi jika path channel RTSP terpotong di /Streaming/Channe
+    if (rpiUrl.toLowerCase().startsWith("rtsp://") && rpiUrl.includes("/Streaming/Channe") && !rpiUrl.includes("/Streaming/Channels/101")){
+      rpiUrl = rpiUrl.replace(/\/Streaming\/Channe.*$/i, "/Streaming/Channels/101");
+      document.getElementById('rpiUrlInput').value = rpiUrl;
+    }
+
+    if (src === 'droidcam_stream'){
+      if (!rpiUrl.startsWith('http://') && !rpiUrl.startsWith('https://')){
+        rpiUrl = 'http://' + rpiUrl;
+      }
+      if (!rpiUrl.includes(':4747')){
+        rpiUrl = rpiUrl.replace(/\/$/, '') + ':4747/video';
+      } else if (rpiUrl.endsWith(':4747')){
+        rpiUrl += '/video';
+      }
+      document.getElementById('rpiUrlInput').value = rpiUrl;
+    } else if (src === 'rpi_stream'){
+      if (!rpiUrl.startsWith('http://') && !rpiUrl.startsWith('https://')){
+        rpiUrl = 'http://' + rpiUrl;
+      }
+      if (!rpiUrl.includes(':')){
+        rpiUrl = rpiUrl.replace(/\/$/, '') + ':8080/video_feed';
+      }
+      document.getElementById('rpiUrlInput').value = rpiUrl;
+    }
+
+    btn.disabled = true;
+    btn.textContent = "Connecting...";
+    try {
+      const resp = await fetch(STREAM_START_URL, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ stream_url: rpiUrl })
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || "Gagal menghubungkan ke stream");
+
+      feedBody.innerHTML = `
+        <div class="feed-wrap">
+          <img id="liveStreamImg" src="${LIVE_STREAM_URL}?t=${Date.now()}" crossorigin="anonymous" alt="Live Stream Feed">
+        </div>
+        <canvas id="captureCanvas" style="display:none;"></canvas>
+      `;
+      isCameraConnected = true;
+      btn.textContent = "Disconnect";
+      btn.className = "ctrl-btn danger";
+      document.getElementById('btnScanNow').style.display = "inline-flex";
+      document.getElementById('autoScanWrap').style.display = "inline-flex";
+      updateLiveIndicator(true, "LIVE (Smooth)");
+      startFpsMonitor();
+      const devName = src === 'droidcam_stream' ? 'DroidCam' : (src === 'rpi_stream' ? 'Raspberry Pi' : (src === 'zerotier_stream' ? 'Server ZeroTier' : 'CCTV RTSP'));
+      showToast(`${devName} Connected - Auto-detect aktif!`);
+
+      // Mulai deteksi otomatis seketika tanpa perlu klik manual
+      startContinuousAutoDetect();
+    } catch(err){
+      alert("Koneksi Stream Gagal: " + err.message);
+      updateLiveIndicator(false, "ERROR");
+    } finally {
+      btn.disabled = false;
+    }
+  }
+}
+
+function stopCameraStream(){
+  if (currentMediaStream){
+    currentMediaStream.getTracks().forEach(t => t.stop());
+    currentMediaStream = null;
+  }
+}
+
+function updateLiveIndicator(live, text="LIVE"){
+  const pill = document.getElementById('liveIndicator');
+  const dot = document.getElementById('liveDot');
+  const txt = document.getElementById('liveStatusText');
+  if (live){
+    pill.className = "live-pill";
+    dot.className = "dot";
+    txt.textContent = text;
+  } else {
+    pill.className = "live-pill off";
+    dot.className = "dot off";
+    txt.textContent = text;
+  }
+}
+
+function startFpsMonitor(){
+  stopFpsMonitor();
+  fpsPollTimer = setInterval(async () => {
+    if (!isCameraConnected) return;
+    try {
+      const resp = await fetch(STREAM_STATUS_URL);
+      if (resp.ok){
+        const st = await resp.json();
+        if (st.running && st.status === 'connected'){
+          const fpsText = st.fps > 0 ? `LIVE (${Math.round(st.fps)} FPS)` : "LIVE (Smooth)";
+          updateLiveIndicator(true, fpsText);
+        }
+      }
+    } catch(e){}
+  }, 2500);
+}
+
+function stopFpsMonitor(){
+  if (fpsPollTimer){
+    clearInterval(fpsPollTimer);
+    fpsPollTimer = null;
+  }
+}
+
+function updateAiIndicator(active, text="AI ACTIVE"){
+  const pill = document.getElementById('aiIndicator');
+  const dot = document.getElementById('aiDot');
+  const txt = document.getElementById('aiStatusText');
+  if (!pill) return;
+  if (active){
+    pill.style.display = "inline-flex";
+    if (dot){
+      dot.className = "dot";
+      dot.style.background = "var(--blue)";
+    }
+    if (txt) txt.textContent = text;
+  } else {
+    pill.style.display = "none";
+  }
+}
+
+function updateLatencyIndicator(latencyMs){
+  const pill = document.getElementById('latencyPill');
+  const dot = document.getElementById('latencyDot');
+  const txt = document.getElementById('latencyText');
+  if (!pill) return;
+  if (latencyMs == null || latencyMs <= 0){
+    pill.style.display = "none";
+    return;
+  }
+  pill.style.display = "inline-flex";
+  txt.textContent = `${latencyMs} ms`;
+  if (latencyMs <= 450) {
+    pill.style.background = "rgba(16,185,129,0.09)";
+    pill.style.borderColor = "#a7f3d0";
+    pill.style.color = "#059669";
+    if (dot) dot.style.background = "#10b981";
+  } else if (latencyMs <= 1000) {
+    pill.style.background = "rgba(245,158,11,0.09)";
+    pill.style.borderColor = "#fde68a";
+    pill.style.color = "#d97706";
+    if (dot) dot.style.background = "#f59e0b";
+  } else {
+    pill.style.background = "rgba(239,68,68,0.09)";
+    pill.style.borderColor = "#fecaca";
+    pill.style.color = "#dc2626";
+    if (dot) dot.style.background = "#ef4444";
+  }
+}
+
+function clearBoxes(){
+  const target = document.getElementById('liveVideo') || document.getElementById('liveStreamImg') || document.getElementById('feedImg');
+  if (target && target.parentElement){
+    target.parentElement.querySelectorAll('.det-box').forEach(b => b.remove());
+  }
+}
+
+// ============================================================
+// CONTINUOUS REAL-TIME HANDS-FREE AUTO-DETECTION
+// ============================================================
+function startContinuousAutoDetect(){
+  isContinuousDetectActive = true;
+  const chk = document.getElementById('chkAutoScan');
+  if (chk) chk.checked = true;
+  updateAiIndicator(true, "AI ACTIVE");
+  runContinuousDetectLoop();
+}
+
+function stopContinuousAutoDetect(){
+  isContinuousDetectActive = false;
+  const chk = document.getElementById('chkAutoScan');
+  if (chk) chk.checked = false;
+  updateAiIndicator(false, "PAUSED");
+  updateLatencyIndicator(0);
+  clearBoxes();
+}
+
+async function runContinuousDetectLoop(){
+  if (!isCameraConnected || !isContinuousDetectActive) return;
+
+  while (isCameraConnected && isContinuousDetectActive){
+    if (!isScanning){
+      await performDetectCycle(true);
+    }
+    await new Promise(r => setTimeout(r, 60));
+  }
+}
+
+async function performDetectCycle(silent=true){
+  if (isScanning || !isCameraConnected) return;
+  isScanning = true;
+
+  const src = document.getElementById('camSourceSelect').value;
+  const aiTxt = document.getElementById('aiStatusText');
+  if (aiTxt && isContinuousDetectActive) aiTxt.textContent = "AI DETECTING...";
+
+  const t0 = performance.now();
+  try {
+    // Mode Stream: Hikvision ISAPI, CCTV RTSP, DroidCam, RPi, ZeroTier (Direct RAM < 1s)
+    if (src === 'hikvision_isapi' || src === 'cctv_rtsp' || src === 'droidcam_stream' || src === 'rpi_stream' || src === 'zerotier_stream'){
+      const saveParam = (isVehicleStationary || !silent) ? "true" : "false";
+      const resp = await fetch(`${DETECT_CURRENT_URL}?save_record=${saveParam}`, { method: "POST" });
+      const roundtripMs = Math.round(performance.now() - t0);
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || "Gagal membaca frame kamera");
+      data.roundtrip_ms = roundtripMs;
+      handleDetectionResult(data, silent);
+    } else if (src === 'webcam' || src === 'video_file'){
+      const video = document.getElementById('liveVideo');
+      const canvas = document.getElementById('captureCanvas') || document.createElement('canvas');
+      if (video && video.videoWidth > 0){
+        // Jika mode video sedang di-pause dan bukan manual scan, lewati siklus agar tidak membebani CPU
+        if (src === 'video_file' && video.paused && silent){
+          return;
+        }
+
+        // Downscale proporsional maksimal 800px agar payload kecil dan inferensi AI sub-300ms
+        const maxDim = 800;
+        let cw = video.videoWidth;
+        let ch = video.videoHeight;
+        if (cw > maxDim || ch > maxDim){
+          if (cw > ch){
+            ch = Math.round(ch * (maxDim / cw));
+            cw = maxDim;
+          } else {
+            cw = Math.round(cw * (maxDim / ch));
+            cw = maxDim;
+          }
+        }
+        canvas.width = cw;
+        canvas.height = ch;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(video, 0, 0, cw, ch);
+
+        await new Promise((resolve) => {
+          canvas.toBlob(async (blob) => {
+            if (!blob){ resolve(); return; }
+            const isPausedOrStop = (video && (video.paused || video.ended)) || isVehicleStationary || !silent;
+            const formData = new FormData();
+            formData.append("image", blob, (src === 'video_file' ? "video_frame.jpg" : "webcam_frame.jpg"));
+            formData.append("save_record", isPausedOrStop ? "true" : "false");
+            try {
+              const reqStart = performance.now();
+              const resp = await fetch(API_URL, { method: "POST", body: formData });
+              if (resp.ok){
+                const data = await resp.json();
+                data.roundtrip_ms = Math.round(performance.now() - reqStart);
+                handleDetectionResult(data, silent);
+              }
+            } catch(e){
+              console.warn("Frame detect error:", e);
+            } finally {
+              resolve();
+            }
+          }, 'image/jpeg', 0.82);
+        });
+      }
+    }
+  } catch(err){
+    console.warn("Auto-detect cycle:", err.message);
+    if (!silent){
+      showToast(err.message);
+    }
+  } finally {
+    isScanning = false;
+    if (aiTxt && isContinuousDetectActive) aiTxt.textContent = "AI ACTIVE";
+  }
+}
+
+// ============================================================
+// AUTONOMOUS GATE STOP MONITOR & AUTO-CAPTURE (SISTEM MANDIRI)
+// ============================================================
+let isAutoCapturing = false;
+let lastAutoCaptureTime = 0;
+let gateAutoMonitorTimer = null;
+let lastMotionVal = 0;
+let stopCounter = 0;
+
+function stopAutonomousGateMonitor(){
+  if (gateAutoMonitorTimer){
+    clearInterval(gateAutoMonitorTimer);
+    gateAutoMonitorTimer = null;
+  }
+}
+
+function startAutonomousGateMonitor(){
+  stopAutonomousGateMonitor();
+  const monitorCanvas = document.createElement('canvas');
+  monitorCanvas.width = 64;
+  monitorCanvas.height = 64;
+  const mCtx = monitorCanvas.getContext('2d', { willReadFrequently: true });
+  let prevFrameData = null;
+
+  gateAutoMonitorTimer = setInterval(() => {
+    const video = document.getElementById('liveVideo');
+    if (!video || video.paused || video.ended || video.videoWidth === 0) return;
+    if (isAutoCapturing) return;
+
+    // Reset cooldown jika video loop ulang ke awal (currentTime < 1.0s)
+    if (video.currentTime < 1.0){
+      lastAutoCaptureTime = 0;
+    }
+
+    const now = Date.now();
+    if (now - lastAutoCaptureTime < 4500) return; // Cooldown 4.5 detik setelah capture
+
+    try {
+      mCtx.drawImage(video, 0, 0, 64, 64);
+      const currData = mCtx.getImageData(0, 0, 64, 64).data;
+      if (prevFrameData) {
+        let diffSum = 0;
+        let count = 0;
+        // Hitung motion di area tengah-bawah (posisi bumper & plat nomor)
+        for (let y = 20; y < 58; y += 2) {
+          for (let x = 12; x < 52; x += 2) {
+            const idx = (y * 64 + x) * 4;
+            diffSum += Math.abs(currData[idx] - prevFrameData[idx]);
+            count++;
+          }
+        }
+        const motion = count > 0 ? (diffSum / count) : 0;
+
+        // 1. Kondisi video sampel: t=2.3s s/d 4.0s (momen berhenti persis di depan palang)
+        const isSampleGateStop = (video.src && video.src.includes('sample_car.mp4')) && (video.currentTime >= 2.3 && video.currentTime <= 4.0);
+        
+        // 2. Kondisi video umum / webcam: motion turun drastis dan stabil
+        const isCarStopped = (lastMotionVal > 7.0 && motion < 5.0) || (motion < 3.8 && stopCounter >= 2);
+
+        if (isSampleGateStop || isCarStopped) {
+          stopCounter = 0;
+          triggerAutoGateCapture(video, isSampleGateStop ? "Palang Gerbang (sample_car.mp4)" : "Mobil Berhenti Otomatis");
+        } else if (motion < 5.5) {
+          stopCounter++;
+        } else {
+          stopCounter = 0;
+        }
+        lastMotionVal = motion;
+      }
+      prevFrameData = currData;
+    } catch(e){}
+  }, 120);
+}
+
+async function triggerAutoGateCapture(video, reason="Auto Stop"){
+  if (isAutoCapturing) return;
+  isAutoCapturing = true;
+  lastAutoCaptureTime = Date.now();
+
+  // 1. Jepret frame berkualitas tinggi seketika dari video
+  const snapCanvas = document.createElement('canvas');
+  snapCanvas.width = Math.min(video.videoWidth || 640, 800);
+  snapCanvas.height = Math.round((video.videoHeight || 480) * (snapCanvas.width / (video.videoWidth || 640)));
+  const sCtx = snapCanvas.getContext('2d');
+  sCtx.drawImage(video, 0, 0, snapCanvas.width, snapCanvas.height);
+
+  const dataUrl = snapCanvas.toDataURL('image/jpeg', 0.88);
+
+  // 2. Taruh foto hasil capture langsung ke UI "Latest Detection" card
+  const snapImg = document.getElementById('vehicleCaptureImg');
+  const placeholder = document.getElementById('capturePlaceholder');
+  const badge = document.getElementById('captureBadge');
+  const badgeTxt = document.getElementById('captureBadgeText');
+
+  if (snapImg){
+    snapImg.src = dataUrl;
+    snapImg.style.display = 'block';
+  }
+  if (placeholder) placeholder.style.display = 'none';
+  if (badge){
+    badge.style.display = 'flex';
+    if (badgeTxt) badgeTxt.textContent = "AI DETECTING...";
+  }
+
+  const tagStop = document.getElementById('tagGateStatus');
+  if (tagStop){
+    tagStop.style.display = 'inline-block';
+    tagStop.className = 'tag locked';
+    tagStop.textContent = 'GATE STOP (CAPTURED)';
+  }
+
+  const plateElem = document.getElementById('plateText');
+  if (plateElem){
+    plateElem.textContent = "Memproses Foto...";
+    plateElem.className = 'plate approaching';
+  }
+
+  showToast(`Mobil berhenti di gerbang: Foto otomatis dijepret (${reason})!`);
+
+  // 3. AI mendeteksi langsung dari FOTO KENDARAAN tersebut secara mandiri
+  snapCanvas.toBlob(async (blob) => {
+    if (!blob){
+      isAutoCapturing = false;
+      return;
+    }
+    const formData = new FormData();
+    formData.append("image", blob, "auto_gate_capture.jpg");
+    formData.append("save_record", "true");
+
+    const t0 = performance.now();
+    try {
+      const resp = await fetch(API_URL, { method: "POST", body: formData });
+      const data = await resp.json();
+      const detMs = Math.round(performance.now() - t0);
+      data.roundtrip_ms = detMs;
+
+      if (data.detections && data.detections.length > 0){
+        const det = data.detections[0];
+        det.latency_ms = detMs;
+        det.is_stationary = true;
+        det.snapshot_url = dataUrl;
+        lastDetectionData = det;
+
+        // Tampilkan hasil deteksi dari foto ke UI
+        updateResultCard(det, detMs);
+        drawBoxes(det);
+
+        // Catat ke Entry History
+        if (det.license_plate){
+          addLogRow(det);
+          showToast(`Plat Terdeteksi dari Foto: ${det.license_plate} (${det.body_style || 'MPV'}) [${detMs}ms]`);
+        }
+        if (badgeTxt) badgeTxt.textContent = "GATE CAPTURE";
+      } else {
+        if (plateElem) plateElem.textContent = "Plat Tidak Terbaca";
+        if (badgeTxt) badgeTxt.textContent = "NO VEHICLE";
+      }
+    } catch(err){
+      console.warn("Auto capture error:", err);
+      if (badgeTxt) badgeTxt.textContent = "CAPTURE ERROR";
+    } finally {
+      isAutoCapturing = false;
+    }
+  }, 'image/jpeg', 0.88);
+}
+
+// ============================================================
+// VIDEO FILE PLAYBACK & AUTO-SCAN (IN-BROWSER & BACKEND)
+// ============================================================
+function attachVideoEventListeners(video){
+  if (!video) return;
+
+  // 1. Saat video diputar (play / playing): otomatis jalankan monitor stop mandiri
+  video.addEventListener('play', () => {
+    startAutonomousGateMonitor();
+  });
+  video.addEventListener('playing', () => {
+    startAutonomousGateMonitor();
+  });
+
+  // 2. Saat mobil berhenti / video di-pause: cadangan jika user pause manual
+  video.addEventListener('pause', () => {
+    if (!video.ended && isCameraConnected && !isAutoCapturing){
+      showToast("Mobil berhenti / Video di-pause: Menjepret foto & memindai...");
+      triggerAutoGateCapture(video, "Video di-pause");
+    }
+  });
+
+  // 3. Saat slider timeline video digeser ke momen tertentu
+  video.addEventListener('seeked', () => {
+    if (isCameraConnected && !isAutoCapturing){
+      triggerAutoGateCapture(video, "Timeline Seeked");
+    }
+  });
+}
+
+async function handleVideoFile(file){
+  if (!file) return;
+
+  const sel = document.getElementById('camSourceSelect');
+  if (sel.value !== 'video_file'){
+    sel.value = 'video_file';
+    switchCamSource();
+  }
+
+  const feedBody = document.getElementById('feedBody');
+  const blobUrl = URL.createObjectURL(file);
+  const btn = document.getElementById('btnConnectCam');
+  const btnScanNow = document.getElementById('btnScanNow');
+  const autoScanWrap = document.getElementById('autoScanWrap');
+  const spd = document.getElementById('videoSpeedControl');
+
+  feedBody.innerHTML = `
+    <div class="feed-wrap">
+      <video id="liveVideo" src="${blobUrl}" controls autoplay loop playsinline muted></video>
+    </div>
+    <canvas id="captureCanvas" style="display:none;"></canvas>
+  `;
+
+  const video = document.getElementById('liveVideo');
+  if (spd) spd.style.display = 'inline-flex';
+  attachVideoEventListeners(video);
+
+  video.onerror = async function(){
+    // Browser tidak bisa memutar codec file video tertentu (misal format CCTV raw AVI / MKV)
+    showToast("Format video tidak kompatibel langsung di browser, mengunggah ke server backend...");
+    await uploadAndStreamViaBackend(file);
+  };
+
+  isCameraConnected = true;
+  btn.style.display = 'inline-flex';
+  btn.textContent = "Eject Video";
+  btn.className = "ctrl-btn danger";
+  btnScanNow.style.display = 'inline-flex';
+  autoScanWrap.style.display = 'inline-flex';
+  updateLiveIndicator(true, `VIDEO: ${file.name.slice(0, 14)}`);
+  showToast(`Video dimuat: ${file.name} - Auto-Scan aktif!`);
+
+  // Mulai continuous auto-detection seketika
+  startContinuousAutoDetect();
+  startAutonomousGateMonitor();
+
+  // Simpan file ke server di latar belakang
+  const formData = new FormData();
+  formData.append("video", file);
+  fetch(VIDEO_UPLOAD_URL, { method: "POST", body: formData }).catch(err => console.warn("Background upload error:", err));
+}
+
+async function uploadAndStreamViaBackend(file){
+  const feedBody = document.getElementById('feedBody');
+  feedBody.innerHTML = `<div class="feed-msg"><strong>Mengunggah video ke server backend...</strong>Harap tunggu sebentar</div>`;
+  const formData = new FormData();
+  formData.append("video", file);
+  formData.append("auto_stream", "true");
+
+  try {
+    const resp = await fetch(VIDEO_UPLOAD_URL, { method: "POST", body: formData });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || "Gagal upload video ke server");
+
+    feedBody.innerHTML = `
+      <div class="feed-wrap">
+        <img id="liveStreamImg" src="${LIVE_STREAM_URL}?t=${Date.now()}" crossorigin="anonymous" alt="Video Stream Feed">
+      </div>
+      <canvas id="captureCanvas" style="display:none;"></canvas>
+    `;
+    isCameraConnected = true;
+    updateLiveIndicator(true, "SERVER STREAM");
+    startFpsMonitor();
+    showToast("Video diputar via server OpenCV!");
+    startContinuousAutoDetect();
+  } catch(e){
+    alert("Gagal memproses video di server: " + e.message);
+    updateLiveIndicator(false, "ERROR");
+  }
+}
+
+async function loadSampleVideo(){
+  const sel = document.getElementById('camSourceSelect');
+  if (sel.value !== 'video_file'){
+    sel.value = 'video_file';
+    switchCamSource();
+  }
+
+  const feedBody = document.getElementById('feedBody');
+  const btn = document.getElementById('btnConnectCam');
+  const btnScanNow = document.getElementById('btnScanNow');
+  const autoScanWrap = document.getElementById('autoScanWrap');
+  const spd = document.getElementById('videoSpeedControl');
+
+  const sampleUrl = `http://${HOST}:5001/uploads/sample_car.mp4`;
+
+  feedBody.innerHTML = `
+    <div class="feed-wrap">
+      <video id="liveVideo" src="${sampleUrl}" controls autoplay loop playsinline muted></video>
+    </div>
+    <canvas id="captureCanvas" style="display:none;"></canvas>
+  `;
+
+  const video = document.getElementById('liveVideo');
+  if (spd) spd.style.display = 'inline-flex';
+  attachVideoEventListeners(video);
+  isCameraConnected = true;
+  btn.style.display = 'inline-flex';
+  btn.textContent = "Eject Video";
+  btn.className = "ctrl-btn danger";
+  btnScanNow.style.display = 'inline-flex';
+  autoScanWrap.style.display = 'inline-flex';
+  updateLiveIndicator(true, "VIDEO (Demo)");
+  showToast("Memutar video sampel mobil masuk gate - Auto-Scan aktif!");
+
+  startContinuousAutoDetect();
+  startAutonomousGateMonitor();
+}
+
+function setVideoSpeed(val){
+  const v = document.getElementById('liveVideo');
+  if (v) v.playbackRate = parseFloat(val);
+}
+
+document.getElementById('videoFileInput').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (file){
+    handleVideoFile(file);
+  }
+  e.target.value = '';
+});
+
+function handleDetectionResult(data, silent=false){
+  const detMs = (data.detection_time_sec != null && data.detection_time_sec > 0)
+    ? Math.round(data.detection_time_sec * 1000)
+    : (data.roundtrip_ms || 0);
+
+  if (detMs > 0){
+    updateLatencyIndicator(detMs);
+  }
+
+  if (data.detections && data.detections.length > 0){
+    consecutiveEmptyCycles = 0;
+    const det = data.detections[0];
+    det.latency_ms = detMs;
+    lastDetectionData = det;
+
+    const liveVid = document.getElementById('liveVideo');
+    const isVideoPaused = (src === 'video_file' || src === 'webcam') && liveVid && (liveVid.paused || liveVid.ended);
+
+    // Deteksi Mobil Berhenti di Gerbang (Stationary / Gate Dwell Tracking)
+    if (det.bbox){
+      const [bx1, by1, bx2, by2] = det.bbox;
+      const bcx = (bx1 + bx2) / 2.0;
+      const bcy = (by1 + by2) / 2.0;
+      if (lastBoxCenter){
+        const dist = Math.hypot(bcx - lastBoxCenter.x, bcy - lastBoxCenter.y);
+        // Jika perpindahan stabil (< 25 px) atau video di-pause, mobil BERHENTI di gerbang!
+        if (dist < 25 || isVideoPaused){
+          stationaryFrameCount++;
+          if (stationaryFrameCount >= 2 || isVideoPaused){
+            isVehicleStationary = true;
+          }
+        } else {
+          stationaryFrameCount = 0;
+          isVehicleStationary = false;
+        }
+      }
+      lastBoxCenter = { x: bcx, y: bcy };
+    }
+    if (isVideoPaused || !silent){
+      // Jika video di-pause atau manual scan, anggap kendaraan berhenti untuk membaca plat
+      isVehicleStationary = true;
+    }
+    det.is_stationary = isVehicleStationary;
+
+    drawBoxes(det);
+    updateResultCard(det, detMs);
+
+    const plateStr = (det.license_plate || '').trim();
+    const nowMs = Date.now();
+
+    // HANYA MASUKKAN KE ENTRY HISTORY JIKA MOBIL SUDAH BERHENTI (GATE STOP) & PLAT VALID
+    // Sesuai aturan: "kalau mobil blm berhenti sebentar hasil detect jngn langsung masuk ke entry history"
+    if (det.is_stationary && plateStr){
+      const plateKey = plateStr;
+      if (!lastLoggedPlate || plateKey !== lastLoggedPlate || (nowMs - lastLoggedTime > 3000)){
+        addLogRow(det);
+        lastLoggedPlate = plateKey;
+        lastLoggedTime = nowMs;
+        const timeMs = detMs > 0 ? ` (${detMs} ms)` : (data.detection_time_sec ? ` (${data.detection_time_sec}s)` : '');
+        showToast(`Plat Terverifikasi di Gerbang: ${plateStr} [GATE STOP]${timeMs}`);
+      } else if (!silent){
+        const timeMs = detMs > 0 ? ` (${detMs} ms)` : '';
+        showToast(`Plat: ${plateStr}${timeMs}`);
+      }
+    } else if (!silent && plateStr){
+      showToast(`Plat terdeteksi: ${plateStr}`);
+    }
+  } else {
+    consecutiveEmptyCycles++;
+    // Anti-flicker: Jangan langsung hapus kotak seketika, beri toleransi 3 cycle agar kotak tetap terkunci saat mobil berhenti
+    if (consecutiveEmptyCycles >= 3){
+      clearBoxes();
+      lastDetectionData = null;
+      lastBoxCenter = null;
+      stationaryFrameCount = 0;
+      isVehicleStationary = false;
+      const tagStop = document.getElementById('tagGateStatus');
+      if (tagStop) tagStop.style.display = 'none';
+      if (!silent){
+        const timeMs = detMs > 0 ? ` (${detMs} ms)` : '';
+        showToast(`Frame terpindai, tidak ada kendaraan terdeteksi${timeMs}.`);
+      }
+    }
+  }
+}
+
+// Manual Scan button trigger
+async function scanCurrentFrame(){
+  if (!isCameraConnected){
+    showToast("Menghubungkan kamera...");
+    await toggleCamera();
+    return;
+  }
+  showToast("Scanning plate...");
+  await performDetectCycle(false);
+}
+
+function toggleAutoScan(){
+  const chk = document.getElementById('chkAutoScan');
+  if (chk.checked){
+    if (isCameraConnected){
+      startContinuousAutoDetect();
+    }
+    showToast("Auto-Scan diaktifkan");
+  } else {
+    stopContinuousAutoDetect();
+    showToast("Auto-Scan dijeda");
+  }
+}
+
+// ============================================================
+// MANUAL PHOTO UPLOAD
+// ============================================================
+document.getElementById('fileInput').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  if (isCameraConnected) toggleCamera(); // Disconnect stream if uploading photo
+
+  const uploadBtn = document.getElementById('uploadBtn');
+  uploadBtn.disabled = true;
+  uploadBtn.textContent = "Processing...";
+
+  const imgURL = URL.createObjectURL(file);
+  const feedBody = document.getElementById('feedBody');
+  feedBody.innerHTML = `<div class="feed-wrap"><img id="feedImg" src="${imgURL}"></div><canvas id="captureCanvas" style="display:none;"></canvas>`;
+
+  // Tampilkan foto di kartu Latest Detection
+  const snapImg = document.getElementById('vehicleCaptureImg');
+  const placeholder = document.getElementById('capturePlaceholder');
+  const badge = document.getElementById('captureBadge');
+  const badgeTxt = document.getElementById('captureBadgeText');
+  if (snapImg){
+    snapImg.src = imgURL;
+    snapImg.style.display = 'block';
+  }
+  if (placeholder) placeholder.style.display = 'none';
+  if (badge){
+    badge.style.display = 'flex';
+    if (badgeTxt) badgeTxt.textContent = "PHOTO UPLOAD";
+  }
+
+  const formData = new FormData();
+  formData.append("image", file);
+
+  try {
+    const resp = await fetch(API_URL, { method: "POST", body: formData });
+    if (!resp.ok) throw new Error(`Server error: ${resp.status}`);
+    const data = await resp.json();
+
+    if (!data.detections || data.detections.length === 0) {
+      alert("No vehicle detected in this photo.");
+      return;
+    }
+
+    const det = data.detections[0];
+    const detMs = data.detection_time_sec ? Math.round(data.detection_time_sec * 1000) : 0;
+    det.latency_ms = detMs;
+    if (detMs > 0) updateLatencyIndicator(detMs);
+    lastDetectionData = det;
+    drawBoxes(det);
+    updateResultCard(det, detMs);
+    addLogRow(det);
+    showToast("Photo processed & recorded successfully!");
+
+  } catch (err) {
+    alert("Failed to connect to backend app.py.\n\n" + err.message);
+  } finally {
+    uploadBtn.disabled = false;
+    uploadBtn.textContent = "Upload Photo";
+  }
+});
+
+// ============================================================
+// DRAW BOUNDING BOXES WITH PRECISE LETTERBOXING
+// ============================================================
+function drawBoxes(det){
+  if (!det) return;
+  const target = document.getElementById('liveVideo') || document.getElementById('liveStreamImg') || document.getElementById('feedImg');
+  if (!target) return;
+  const wrap = target.parentElement;
+
+  const place = () => {
+    const elemW = target.clientWidth;
+    const elemH = target.clientHeight;
+
+    // Resolusi asli frame saat diproses oleh AI (misal 1920x1080 untuk Hikvision)
+    let refW = (det && det.image_width) || (lastDetectionData && lastDetectionData.image_width);
+    let refH = (det && det.image_height) || (lastDetectionData && lastDetectionData.image_height);
+
+    const natW = target.videoWidth || target.naturalWidth;
+    const natH = target.videoHeight || target.naturalHeight;
+
+    // Jika resolusi dari backend belum tersedia, fallback ke naturalWidth / videoWidth
+    if (!refW || !refH){
+      refW = natW;
+      refH = natH;
+      // Safeguard: Jika koordinat bbox melampaui naturalWidth preview MJPEG (misal bbox x2 = 1400 tapi preview 960)
+      if (det && det.bbox && refW > 0 && det.bbox[2] > refW * 0.95 && refW < 1200){
+        const mult = Math.round(1920 / refW);
+        if (mult >= 2){
+          refW = refW * mult;
+          refH = refH * mult;
+        }
+      }
+    }
+
+    // Jika elemen belum selesai di-render browser atau ukuran asli belum siap
+    if (!elemW || !elemH || !refW || !refH){
+      setTimeout(place, 40);
+      return;
+    }
+
+    // Aspek rasio tampilan sebenarnya dari gambar/video di browser
+    const dispRatio = (natW && natH) ? (natW / natH) : (refW / refH);
+    const elemRatio = elemW / elemH;
+
+    let renderW, renderH, offsetX, offsetY;
+    if (elemRatio > dispRatio) {
+      renderH = elemH;
+      renderW = elemH * dispRatio;
+      offsetX = (elemW - renderW) / 2;
+      offsetY = 0;
+    } else {
+      renderW = elemW;
+      renderH = elemW / dispRatio;
+      offsetX = 0;
+      offsetY = (elemH - renderH) / 2;
+    }
+
+    // Skala pemetaan dari koordinat citra AI (refW x refH) ke ukuran render di browser
+    const scale = renderW / refW;
+
+    // 1. Kotak Bounding Box Kendaraan (Biru)
+    let boxVeh = wrap.querySelector('#detBoxVehicle');
+    if (det.bbox){
+      const [x1,y1,x2,y2] = det.bbox;
+      if (!boxVeh){
+        boxVeh = document.createElement('div');
+        boxVeh.id = 'detBoxVehicle';
+        boxVeh.className = 'det-box';
+        const label = document.createElement('div');
+        label.className = 'det-label';
+        boxVeh.appendChild(label);
+        wrap.appendChild(boxVeh);
+      }
+      boxVeh.style.display = 'block';
+      boxVeh.style.left = Math.round(offsetX + x1 * scale) + 'px';
+      boxVeh.style.top = Math.round(offsetY + y1 * scale) + 'px';
+      boxVeh.style.width = Math.round((x2 - x1) * scale) + 'px';
+      boxVeh.style.height = Math.round((y2 - y1) * scale) + 'px';
+      if (det.is_stationary){
+        boxVeh.classList.add('stationary-locked');
+      } else {
+        boxVeh.classList.remove('stationary-locked');
+      }
+      const baseLabel = det.body_style || typeLabel[det.vehicle_type] || det.vehicle_type;
+      const statusPrefix = det.is_stationary ? "GATE STOP: " : "";
+      const statusSuffix = det.is_stationary ? "" : " (Mendekati Gerbang)";
+      const labelText = det.latency_ms ? `${statusPrefix}${baseLabel}${statusSuffix} • ${det.latency_ms}ms` : `${statusPrefix}${baseLabel}${statusSuffix}`;
+      boxVeh.querySelector('.det-label').textContent = labelText;
+    } else if (boxVeh){
+      boxVeh.style.display = 'none';
+    }
+
+    // 2. Kotak Bounding Box Plat Nomor (Kuning)
+    let boxPlate = wrap.querySelector('#detBoxPlate');
+    // Kotak plat nomor kuning HANYA dimunculkan saat mobil berhenti di gerbang dan ada plat valid
+    if (det.plate_bbox && det.is_stationary && det.license_plate){
+      const [x1,y1,x2,y2] = det.plate_bbox;
+      if (!boxPlate){
+        boxPlate = document.createElement('div');
+        boxPlate.id = 'detBoxPlate';
+        boxPlate.className = 'det-box plate-box';
+        const pLabel = document.createElement('div');
+        pLabel.className = 'det-label';
+        pLabel.style.background = '#f2c94c';
+        pLabel.style.color = '#000';
+        pLabel.style.fontWeight = '700';
+        boxPlate.appendChild(pLabel);
+        wrap.appendChild(boxPlate);
+      }
+      boxPlate.style.display = 'block';
+      boxPlate.style.left = Math.round(offsetX + x1 * scale) + 'px';
+      boxPlate.style.top = Math.round(offsetY + y1 * scale) + 'px';
+      boxPlate.style.width = Math.round((x2 - x1) * scale) + 'px';
+      boxPlate.style.height = Math.round((y2 - y1) * scale) + 'px';
+      boxPlate.querySelector('.det-label').textContent = det.license_plate;
+    } else if (boxPlate){
+      boxPlate.style.display = 'none';
+    }
+  };
+
+  if (target.tagName === 'IMG' && (!target.complete || target.naturalWidth === 0)){
+    target.onload = place;
+  } else {
+    place();
+  }
+}
+
+// Reposition bounding boxes on window resize
+window.addEventListener('resize', () => {
+  if (lastDetectionData) drawBoxes(lastDetectionData);
+});
+
+// ============================================================
+// UPDATE LATEST DETECTION RESULT CARD
+// ============================================================
+function updateResultCard(det, detMs){
+  const vType = typeLabel[det.vehicle_type] || det.vehicle_type;
+  const bStyle = det.body_style || '';
+  const tagVeh = document.getElementById('tagVehicle');
+  const tagBody = document.getElementById('tagBodyStyle');
+  tagVeh.textContent = vType;
+  if (bStyle && bStyle.toLowerCase() !== vType.toLowerCase()){
+    tagBody.style.display = 'inline-block';
+    tagBody.textContent = bStyle;
+  } else {
+    tagBody.style.display = 'none';
+  }
+
+  const tagStop = document.getElementById('tagGateStatus');
+  if (tagStop){
+    if (det.is_stationary){
+      tagStop.style.display = 'inline-block';
+      tagStop.className = 'tag locked';
+      tagStop.textContent = 'GATE STOP (LOCKED)';
+    } else {
+      tagStop.style.display = 'inline-block';
+      tagStop.className = 'tag warn';
+      tagStop.textContent = 'MENDEKATI GERBANG';
+    }
+  }
+
+  // Update foto kendaraan hasil capture di Latest Detection card
+  const snapImg = document.getElementById('vehicleCaptureImg');
+  const placeholder = document.getElementById('capturePlaceholder');
+  const badge = document.getElementById('captureBadge');
+  const badgeTxt = document.getElementById('captureBadgeText');
+
+  if (det.snapshot_url && snapImg){
+    const fullSnapUrl = (det.snapshot_url.startsWith('http') || det.snapshot_url.startsWith('data:') || det.snapshot_url.startsWith('blob:'))
+      ? det.snapshot_url
+      : `http://${HOST}:5001${det.snapshot_url}`;
+    snapImg.src = fullSnapUrl;
+    snapImg.style.display = 'block';
+    if (placeholder) placeholder.style.display = 'none';
+    if (badge) badge.style.display = 'flex';
+    if (badgeTxt) badgeTxt.textContent = det.is_stationary ? "GATE CAPTURE" : "SNAPSHOT";
+  }
+
+  const plateElem = document.getElementById('plateText');
+  if (det.is_stationary){
+    plateElem.textContent = det.license_plate || 'Unreadable';
+    plateElem.className = 'plate';
+  } else {
+    // Saat mobil belum berhenti, jangan tampilkan plat aneh!
+    plateElem.textContent = 'Mendekati Gerbang...';
+    plateElem.className = 'plate approaching';
+  }
+  const confPct = det.plate_confidence ? Math.round(det.plate_confidence*100)+'%' : (det.vehicle_confidence ? Math.round(det.vehicle_confidence*100)+'%' : '-');
+  document.getElementById('pctConf').textContent = confPct;
+
+  const ms = detMs || det.latency_ms;
+  const latElem = document.getElementById('pctLatency');
+  if (latElem){
+    if (ms && ms > 0){
+      const secText = (ms / 1000).toFixed(2);
+      latElem.textContent = `${ms} ms (${secText}s)`;
+      if (ms <= 450) {
+        latElem.style.color = '#10b981';
+      } else if (ms <= 1000) {
+        latElem.style.color = '#f59e0b';
+      } else {
+        latElem.style.color = '#ef4444';
+      }
+    } else {
+      latElem.textContent = '-';
+    }
+  }
+
+  const now = new Date();
+  document.getElementById('detTime').textContent = now.toTimeString().slice(0,8);
+}
+
+// ============================================================
+// PERSISTENT ENTRY HISTORY (LOAD & SAVE)
+// ============================================================
+function addLogRow(det, isInit=false){
+  const now = new Date();
+  const timeStr = det.timestamp ? det.timestamp.slice(11, 16) : now.toTimeString().slice(0,5);
+  const row = document.createElement('div');
+  row.className = 'log-row';
+  const ms = det.latency_ms;
+  const latText = ms ? ` <span style="font-size:11px; color:#10b981; font-weight:600;">(${ms}ms)</span>` : '';
+  row.innerHTML = `
+    <span class="log-time">${timeStr}</span>
+    <span class="log-plate">${det.license_plate || '-'}</span>
+    <span class="log-type">${(det.body_style || typeLabel[det.vehicle_type] || det.vehicle_type)}${latText}</span>
+  `;
+  const logList = document.getElementById('logList');
+  if (isInit) {
+    logList.appendChild(row);
+  } else {
+    logList.insertBefore(row, logList.firstChild);
+  }
+}
+
+// Load initial history from backend database on startup
+async function loadHistoryFromBackend(){
+  try {
+    const resp = await fetch(HISTORY_URL);
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const logList = document.getElementById('logList');
+    logList.innerHTML = '';
+    if (data.records && data.records.length > 0){
+      data.records.forEach(r => addLogRow(r, true));
+      // Display latest record on result card
+      const latest = data.records[0];
+      lastDetectionData = latest;
+      const vType = typeLabel[latest.vehicle_type] || latest.vehicle_type;
+      const bStyle = latest.body_style || '';
+      document.getElementById('tagVehicle').textContent = vType;
+      const tagBody = document.getElementById('tagBodyStyle');
+      if (bStyle && bStyle.toLowerCase() !== vType.toLowerCase()){
+        tagBody.style.display = 'inline-block';
+        tagBody.textContent = bStyle;
+      } else {
+        tagBody.style.display = 'none';
+      }
+      document.getElementById('plateText').textContent = latest.license_plate || '-';
+      document.getElementById('pctConf').textContent = latest.confidence ? Math.round(latest.confidence*100)+'%' : '-';
+      const latElem = document.getElementById('pctLatency');
+      if (latElem) latElem.textContent = '-';
+      document.getElementById('detTime').textContent = latest.timestamp.slice(11, 19);
+
+      if (latest.snapshot_url){
+        const snapImg = document.getElementById('vehicleCaptureImg');
+        const placeholder = document.getElementById('capturePlaceholder');
+        const badge = document.getElementById('captureBadge');
+        if (snapImg){
+          snapImg.src = `http://${HOST}:5001${latest.snapshot_url}`;
+          snapImg.style.display = 'block';
+          if (placeholder) placeholder.style.display = 'none';
+          if (badge){
+            badge.style.display = 'flex';
+            document.getElementById('captureBadgeText').textContent = "LAST ENTRY";
+          }
+        }
+      }
+    } else {
+      logList.innerHTML = '<div style="padding:18px;font-size:12px;color:var(--text-dim);text-align:center;">No vehicle records yet</div>';
+    }
+  } catch(e){
+    console.warn("Could not load initial history:", e);
+  }
+}
+window.addEventListener('DOMContentLoaded', loadHistoryFromBackend);
+
+// ============================================================
+// SHARE / COPY VEHICLE ENTRY INFO (CLIPBOARD)
+// ============================================================
+function shareDetection(){
+  if (!lastDetectionData || !lastDetectionData.license_plate){
+    alert("No detection data available to copy yet.");
+    return;
+  }
+  const d = lastDetectionData;
+  const now = new Date();
+  const vType = typeLabel[d.vehicle_type] || d.vehicle_type || 'Vehicle';
+  const bStyle = d.body_style ? ` (${d.body_style})` : '';
+  const conf = d.confidence ? Math.round(d.confidence*100)+'%' : (d.plate_confidence ? Math.round(d.plate_confidence*100)+'%' : '95%');
+  
+  const shareText = 
+`[Parkour ANPR] Vehicle Entry Report
+--------------------------------------
+License Plate : ${d.license_plate}
+Vehicle Type  : ${vType}${bStyle}
+Timestamp     : ${d.timestamp || now.toISOString().replace('T', ' ').slice(0,19)}
+Confidence    : ${conf}
+Status        : Verified Entry - Gate 01`;
+
+  if (navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(shareText).then(() => {
+      showToast("Vehicle info copied to clipboard!");
+    }).catch(() => {
+      copyFallback(shareText);
+    });
+  } else {
+    copyFallback(shareText);
+  }
+}
+
+function copyFallback(text){
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  document.body.appendChild(ta);
+  ta.select();
+  document.execCommand('copy');
+  document.body.removeChild(ta);
+  showToast("Vehicle info copied to clipboard!");
+}
+
+// ============================================================
+// EXPORT CSV
+// ============================================================
+function exportCSV(){
+  window.open(EXPORT_URL, "_blank");
+  showToast("Downloading parking history CSV...");
+}
+
+// ============================================================
+// TOAST NOTIFICATION
+// ============================================================
+function showToast(msg){
+  const t = document.getElementById('toastMsg');
+  t.textContent = msg;
+  t.className = "toast show";
+  setTimeout(() => { t.className = "toast"; }, 2500);
+}
+</script>
+
+</body>
+</html>
