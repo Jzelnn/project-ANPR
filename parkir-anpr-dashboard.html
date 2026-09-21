@@ -1507,16 +1507,16 @@ function handleDetectionResult(data, silent=false){
       lastLoggedTime = nowMs;
       const timeMs = detMs > 0 ? ` (${detMs} ms)` : (data.detection_time_sec ? ` (${data.detection_time_sec}s)` : '');
       const plateShow = plateStr || det.body_style || det.vehicle_type;
-      const stopNotice = isVehicleStationary ? " [GATE STOP]" : "";
-      showToast(`Plat terdeteksi: ${plateShow}${stopNotice}${timeMs}`);
+      showToast(`Plat terdeteksi: ${plateShow}${timeMs}`);
     } else if (!silent){
       const timeMs = detMs > 0 ? ` (${detMs} ms)` : '';
       showToast(`Plat: ${plateStr || 'Vehicle detected'}${timeMs}`);
     }
   } else {
     consecutiveEmptyCycles++;
-    // Anti-flicker: Jangan langsung hapus kotak seketika, beri toleransi 3 cycle agar kotak tetap terkunci saat mobil berhenti
-    if (consecutiveEmptyCycles >= 3){
+    // Anti-flicker: Pertahankan bounding box tetap still (diam / terkunci) saat kendaraan berhenti di gerbang
+    // Berikan toleransi hingga 8 siklus (~6-8 detik) agar kotak tidak berkedip atau hilang tiba-tiba
+    if (consecutiveEmptyCycles >= 8){
       clearBoxes();
       lastDetectionData = null;
       lastBoxCenter = null;
@@ -1688,17 +1688,43 @@ function drawBoxes(det){
         boxVeh.classList.remove('stationary-locked');
       }
       const baseLabel = det.body_style || typeLabel[det.vehicle_type] || det.vehicle_type;
-      const statusPrefix = det.is_stationary ? "GATE STOP: " : "";
-      const labelText = det.latency_ms ? `${statusPrefix}${baseLabel} • ${det.latency_ms}ms` : `${statusPrefix}${baseLabel}`;
+      const labelText = det.latency_ms ? `${baseLabel} • ${det.latency_ms}ms` : baseLabel;
       boxVeh.querySelector('.det-label').textContent = labelText;
     } else if (boxVeh){
       boxVeh.style.display = 'none';
     }
 
-    // 2. Kotak Bounding Box Plat Nomor (Kuning)
+    // 2. Kotak Bounding Box Plat Nomor (Kuning) - ALWAYS STILL ON VEHICLE & PLATE
     let boxPlate = wrap.querySelector('#detBoxPlate');
-    if (det.plate_bbox){
-      const [x1,y1,x2,y2] = det.plate_bbox;
+    let effectivePlateBox = det.plate_bbox;
+
+    // Jika frame saat ini belum mendapatkan plate_bbox, tetapi ada plate_bbox sebelumnya
+    // pada mobil yang sama, atau hitung estimasi plate relative terhadap bbox mobil:
+    if (!effectivePlateBox && lastDetectionData && lastDetectionData.plate_bbox && det.bbox){
+      effectivePlateBox = lastDetectionData.plate_bbox;
+    } else if (!effectivePlateBox && det.bbox){
+      const [vx1, vy1, vx2, vy2] = det.bbox;
+      const vw = vx2 - vx1;
+      const vh = vy2 - vy1;
+      if (det.vehicle_type === 'motorcycle'){
+        effectivePlateBox = [
+          Math.round(vx1 + vw * 0.28),
+          Math.round(vy1 + vh * 0.45),
+          Math.round(vx1 + vw * 0.72),
+          Math.round(vy1 + vh * 0.75)
+        ];
+      } else {
+        effectivePlateBox = [
+          Math.round(vx1 + vw * 0.35),
+          Math.round(vy1 + vh * 0.68),
+          Math.round(vx1 + vw * 0.65),
+          Math.round(vy1 + vh * 0.86)
+        ];
+      }
+    }
+
+    if (effectivePlateBox){
+      const [x1,y1,x2,y2] = effectivePlateBox;
       if (!boxPlate){
         boxPlate = document.createElement('div');
         boxPlate.id = 'detBoxPlate';
@@ -1716,7 +1742,13 @@ function drawBoxes(det){
       boxPlate.style.top = Math.round(offsetY + y1 * scale) + 'px';
       boxPlate.style.width = Math.round((x2 - x1) * scale) + 'px';
       boxPlate.style.height = Math.round((y2 - y1) * scale) + 'px';
-      boxPlate.querySelector('.det-label').textContent = det.license_plate || 'PLATE';
+      if (det.is_stationary){
+        boxPlate.classList.add('stationary-locked');
+      } else {
+        boxPlate.classList.remove('stationary-locked');
+      }
+      const plateTextDisplay = det.license_plate || (lastDetectionData && lastDetectionData.license_plate) || 'PLAT NOMOR';
+      boxPlate.querySelector('.det-label').textContent = plateTextDisplay;
     } else if (boxPlate){
       boxPlate.style.display = 'none';
     }

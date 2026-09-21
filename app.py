@@ -736,11 +736,9 @@ def ensemble_plate_reading(plate_crop):
     char_raw = char_raw.upper()
     c_clean = re.sub(r'[^A-Z0-9]', '', char_raw)
 
-    # Fast-Path: Jika char_model menghasilkan plat lengkap dengan keyakinan tinggi pada setiap huruf
-    m = re.match(r'^([A-Z]{1,2})(\d{1,4})([A-Z]{1,3})$', c_clean)
-    min_char_conf = min([c["conf"] for c in line1_chars]) if line1_chars else 0.0
-
-    if m and char_conf >= 0.82 and min_char_conf >= 0.72:
+    # Fast-Path: Jika char_model menghasilkan karakter plat (>= 3 karakter dan conf >= 0.35)
+    # Langsung gunakan hasil YOLO char_model tanpa memanggil EasyOCR (menghemat ~400ms CPU)
+    if len(c_clean) >= 3 and char_conf >= 0.35:
         final_formatted = refine_indonesian_plate(char_raw, "", [])
         print(f"[DEBUG] Fast-Path Plate Reading : '{final_formatted}' (conf: {char_conf:.2f}, {len(line1_chars)} chars, sub-100ms)")
         return {
@@ -778,105 +776,42 @@ def ensemble_plate_reading(plate_crop):
 
 def classify_vehicle_indonesian(image, bbox, initial_vtype, v_conf):
     """
-    Sistem klasifikasi bodi kendaraan & harmonisasi tipe kendaraan terpadu v2:
-    - Menghilangkan misklasifikasi mobil keluarga (Innova, Avanza, Ertiga, Xpander) menjadi Bus atau Sports Car.
-    - Mengelompokkan kendaraan Indonesia secara presisi: MPV, SUV, Sedan, Hatchback, Pickup, Truk, Minibus, Bus, Motor.
+    Sistem klasifikasi murni berbasis akurasi/confidence model (Argmax):
+    - Jika model deteksi mendeteksi 'bus', 'truck', atau 'motorcycle' dengan akurasi tertinggi,
+      maka tipe tersebut yang langsung dipakai (tanpa dioverride atau dibanding-bandingkan).
+    - Jika model deteksi mendeteksi 'car', bodi kendaraan diambil murni dari kelas body_style
+      dengan probabilitas / confidence tertinggi dari model.
     """
+    if initial_vtype == "bus":
+        return "bus", "Bus", round(v_conf, 3)
+    if initial_vtype == "truck":
+        return "truck", "Truk", round(v_conf, 3)
     if initial_vtype == "motorcycle":
         return "motorcycle", "Motor", round(v_conf, 3)
 
+    # Kendaraan adalah mobil (car): ambil body style murni dengan confidence tertinggi
     x1, y1, x2, y2 = bbox
-    car_w = max(1, x2 - x1)
-    car_h = max(1, y2 - y1)
-    aspect = car_h / float(car_w)
-
     crop = crop_vehicle_with_context(image, x1, y1, x2, y2, pad_ratio=0.04)
     if crop.size == 0:
-        fallback_name = "Mobil" if initial_vtype == "car" else ("Truk" if initial_vtype == "truck" else ("Bus" if initial_vtype == "bus" else "Motor"))
-        return initial_vtype, fallback_name, round(v_conf, 3)
+        return "car", "Mobil", round(v_conf, 3)
 
     bs_res = body_style_model.predict(crop, imgsz=224, verbose=False)[0]
     probs = {bs_res.names[i]: float(bs_res.probs.data[i]) for i in range(len(bs_res.names))}
 
-    p_conv = probs.get('Convertible', 0.0)
-    p_crossover = probs.get('Crossover', 0.0)
-    p_fastback = probs.get('Fastback', 0.0)
-    p_hatch = probs.get('Hatchback', 0.0)
-    p_mpv = probs.get('MPV', 0.0)
-    p_minibus = probs.get('Minibus', 0.0)
-    p_pickup = probs.get('Pickup Truck', 0.0)
-    p_suv = probs.get('SUV', 0.0)
-    p_sedan = probs.get('Sedan', 0.0)
-    p_sports = probs.get('Sports_HardtopConvertible', 0.0)
-    p_wagon = probs.get('Wagon', 0.0)
+    # Pilih kelas dengan probabilitas / confidence tertinggi murni
+    top_name, top_conf = max(probs.items(), key=lambda kv: kv[1])
 
-    # 1. KENDARAAN DETEKSI TRUK (vehicle_model)
-    if initial_vtype == "truck":
-        # Pickup Bak Ringan (Carry, Gran Max Bak, L300)
-        if p_pickup >= 0.35:
-            return 'truck', 'Pickup', round(p_pickup, 3)
-        # Isuzu Elf travel van (Hanya jika benar-benar travel bus microbus dengan keyakinan minibus ekstrem)
-        if p_minibus >= 0.95 and v_conf < 0.70:
-            return 'bus', 'Minibus', round(p_minibus, 3)
-        # Truk Komersial murni (Canter, Dutro, Dump Truck, Box, Fuso, Tronton)
-        return 'truck', 'Truk', round(v_conf, 3)
-
-    # 2. KENDARAAN DETEKSI BUS (vehicle_model)
-    if initial_vtype == "bus":
-        if p_minibus >= 0.35:
-            return 'bus', 'Minibus', round(p_minibus, 3)
-        return 'bus', 'Bus', round(v_conf, 3)
-
-    # 3. KENDARAAN DETEKSI MOBIL PENUMPANG (CAR)
-    # Filter ketat Sports Car: Hanya jika probabilitas tinggi dan bodi sangat ceper (aspect < 0.52)
-    if (p_sports + p_conv) >= 0.65 and aspect < 0.52:
-        return 'car', 'Sports Car', round(p_sports + p_conv, 3)
-
-    # Filter Minibus Komersial murni (HiAce, Staria, Alphard panjang):
-    # Hanya jika p_minibus sangat dominan dan rasio bodi tinggi boxy
-    if p_minibus >= 0.75 and aspect >= 0.80 and (car_w * car_h) > 150000:
-        return 'bus', 'Minibus', round(p_minibus, 3)
-
-    # Pickup / Double Cabin terdeteksi sebagai car
-    if p_pickup >= 0.55:
-        return 'truck', 'Pickup', round(p_pickup, 3)
-
-    # Untuk mobil penumpang harian di Indonesia:
-    # Gabungkan sinyal MPV: Di model barat, MPV keluarga Indonesia (Innova, Avanza, Ertiga, Calya)
-    # sering terpecah sinyalnya ke MPV + Wagon + Minibus + Crossover
-    score_mpv = p_mpv * 1.5 + p_wagon * 1.2 + p_minibus * 0.9
-    score_suv = p_suv * 1.3 + p_crossover * 1.0
-    score_hatch = p_hatch * 1.3 + p_fastback * 0.8
-    score_sedan = p_sedan * 1.3
-
-    # Penyesuaian proporsi fisik (Aspect Ratio & Ground Clearance):
-    if aspect >= 0.72:
-        # Bodi jangkung (MPV / SUV)
-        score_mpv += 0.20
-        score_suv += 0.15
-        score_sedan = max(0.0, score_sedan - 0.30)
-    elif aspect <= 0.62:
-        # Bodi rendah / ceper (Sedan / Hatchback)
-        score_sedan += 0.20
-        score_hatch += 0.15
-        score_mpv = max(0.0, score_mpv - 0.25)
-        score_suv = max(0.0, score_suv - 0.25)
-
-    scores = {
-        'MPV': score_mpv,
-        'SUV': score_suv,
-        'Hatchback': score_hatch,
-        'Sedan': score_sedan
+    # Penamaan bodi umum
+    name_map = {
+        'Wagon': 'MPV',
+        'Crossover': 'SUV',
+        'Pickup Truck': 'Pickup',
+        'Convertible': 'Sports Car',
+        'Sports_HardtopConvertible': 'Sports Car'
     }
+    body_style = name_map.get(top_name, top_name)
 
-    best_cat = max(scores.items(), key=lambda kv: kv[1])[0]
-    best_val = scores[best_cat]
-
-    # Normalisasi skor
-    tot_score = max(0.01, sum(scores.values()))
-    norm_conf = min(0.99, max(0.60, best_val / tot_score))
-
-    return 'car', best_cat, round(norm_conf, 3)
+    return "car", body_style, round(top_conf, 3)
 
 
 def map_indonesian_body_style(probs_dict, bbox, img_shape):
@@ -927,11 +862,16 @@ def run_anpr(image_input, vehicle_conf=0.25, motorcycle_conf=0.08, plate_conf=0.
 
     ih, iw = img.shape[:2]
 
-    # 1. Deteksi Kendaraan & 2. Deteksi Plat Nomor secara Paralel (Multi-core ThreadPool, imgsz=640)
-    fut_v = ai_pool.submit(vehicle_model.predict, img, conf=motorcycle_conf, imgsz=640, verbose=False)
-    fut_p = ai_pool.submit(plate_model.predict, img, conf=plate_conf, imgsz=640, verbose=False)
+    # 1. Deteksi Kendaraan & 2. Deteksi Plat Nomor secara Paralel (Multi-core ThreadPool, imgsz=480 untuk kecepatan tinggi)
+    fut_v = ai_pool.submit(vehicle_model.predict, img, conf=motorcycle_conf, imgsz=480, verbose=False)
+    fut_p = ai_pool.submit(plate_model.predict, img, conf=plate_conf, imgsz=480, verbose=False)
     vdet = fut_v.result()[0]
     pdet_global = fut_p.result()[0]
+
+    # Filter kendaraan di depan kamera (abaikan kendaraan kecil di latar belakang / kejauhan)
+    min_vehicle_area = (iw * ih) * 0.035  # Minimal 3.5% dari luas layar
+    min_y2 = ih * 0.35                    # Bagian bawah kendaraan harus mencapai minimal 35% tinggi frame
+
     candidates = []
     for box in vdet.boxes:
         v_cls = int(box.cls[0])
@@ -942,6 +882,11 @@ def run_anpr(image_input, vehicle_conf=0.25, motorcycle_conf=0.08, plate_conf=0.
             continue
         x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
         area = (x2 - x1) * (y2 - y1)
+
+        # Abaikan kendaraan kecil di kejauhan/belakang
+        if area < min_vehicle_area or y2 < min_y2:
+            continue
+
         candidates.append({
             "vehicle_type": vehicle_type,
             "v_conf": v_conf,
@@ -967,19 +912,16 @@ def run_anpr(image_input, vehicle_conf=0.25, motorcycle_conf=0.08, plate_conf=0.
     # Jika kendaraan terdeteksi
     if candidates:
         if single_vehicle_mode and len(candidates) > 1:
-            # Utamakan kendaraan yang berada di lajur gerbang aktif (memuat plat dengan skor prioritas gerbang tertinggi)
-            if global_plates:
-                best_global_p = max(global_plates, key=lambda p: get_gate_plate_priority(p, iw, ih))
-                g_cx = (best_global_p["box"][0] + best_global_p["box"][2]) / 2.0
-                g_cy = (best_global_p["box"][1] + best_global_p["box"][3]) / 2.0
-                cand_for_best_p = [c for c in candidates if (c["x1"] - 30 <= g_cx <= c["x2"] + 30 and c["y1"] - 30 <= g_cy <= c["y2"] + 30)]
-                if cand_for_best_p:
-                    candidates = [max(cand_for_best_p, key=lambda c: c["area"])]
-                else:
-                    candidates_with_plate = [c for c in candidates if any(c["x1"] <= (p["box"][0] + p["box"][2]) / 2 <= c["x2"] and c["y1"] <= (p["box"][1] + p["box"][3]) / 2 <= c["y2"] for p in global_plates)]
-                    candidates = [max(candidates_with_plate, key=lambda c: c["area"])] if candidates_with_plate else [max(candidates, key=lambda c: c["area"])]
-            else:
-                candidates = [max(candidates, key=lambda c: c["area"])]
+            # Fungsi pembobotan fokus kendaraan tepat di depan kamera (foreground):
+            # Prioritaskan kendaraan paling dekat ke kamera (y2 paling bawah) dan luas terbesar
+            def get_foreground_score(c):
+                cx = (c["x1"] + c["x2"]) / 2.0
+                center_dist = abs(cx - (iw / 2.0)) / (iw / 2.0)
+                center_weight = max(0.4, 1.0 - (center_dist * 0.5))
+                depth_weight = (c["y2"] / float(ih)) ** 2.0
+                return c["area"] * depth_weight * center_weight
+
+            candidates = [max(candidates, key=get_foreground_score)]
 
         for cand in candidates:
             initial_vtype = cand["vehicle_type"]
@@ -1012,7 +954,8 @@ def run_anpr(image_input, vehicle_conf=0.25, motorcycle_conf=0.08, plate_conf=0.
                 plate_conf_val = matched_plate["conf"]
                 abs_plate_bbox = [gpx1, gpy1, gpx2, gpy2]
             elif vehicle_crop.size > 0:
-                pdet_crop = plate_model.predict(vehicle_crop, conf=plate_conf, imgsz=640, verbose=False)[0]
+                # Coba deteksi plat nomor dengan conf sensitif (0.10) pada crop kendaraan (imgsz=480)
+                pdet_crop = plate_model.predict(vehicle_crop, conf=0.10, imgsz=480, verbose=False)[0]
                 if len(pdet_crop.boxes) > 0:
                     best_b = max(pdet_crop.boxes, key=lambda b: float(b.conf[0]))
                     cpx1, cpy1, cpx2, cpy2 = map(int, best_b.xyxy[0].tolist())
@@ -1021,7 +964,22 @@ def run_anpr(image_input, vehicle_conf=0.25, motorcycle_conf=0.08, plate_conf=0.
                     plate_crop = crop_plate_with_padding(img, abs_plate_bbox[0], abs_plate_bbox[1],
                                                          abs_plate_bbox[2], abs_plate_bbox[3])
                 else:
-                    plate_crop = np.array([])
+                    # Fallback ROI Plat Nomor: Pastikan bounding box plat nomor SELALU ADA & STILL di bemper depan kendaraan
+                    vw = x2 - x1
+                    vh = y2 - y1
+                    if vehicle_type == "motorcycle":
+                        p_px1 = max(0, x1 + int(vw * 0.28))
+                        p_py1 = max(0, y1 + int(vh * 0.45))
+                        p_px2 = min(iw, x1 + int(vw * 0.72))
+                        p_py2 = min(ih, y1 + int(vh * 0.75))
+                    else:
+                        p_px1 = max(0, x1 + int(vw * 0.35))
+                        p_py1 = max(0, y1 + int(vh * 0.68))
+                        p_px2 = min(iw, x1 + int(vw * 0.65))
+                        p_py2 = min(ih, y1 + int(vh * 0.86))
+                    abs_plate_bbox = [p_px1, p_py1, p_px2, p_py2]
+                    plate_conf_val = 0.50
+                    plate_crop = crop_plate_with_padding(img, p_px1, p_py1, p_px2, p_py2)
             else:
                 plate_crop = np.array([])
 

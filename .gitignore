@@ -1,0 +1,22 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual Environment
+venv/
+env/
+ENV/
+
+# Temporary captures and large uploaded videos
+captures/
+temp_upload.jpg
+uploads/*
+!uploads/sample_car.mp4
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp

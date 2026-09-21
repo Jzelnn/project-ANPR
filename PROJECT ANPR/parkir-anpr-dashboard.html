@@ -1971,9 +1971,7 @@ function drawBoxes(det){
         boxVeh.classList.remove('stationary-locked');
       }
       const baseLabel = det.body_style || typeLabel[det.vehicle_type] || det.vehicle_type;
-      const statusPrefix = det.is_stationary ? "GATE STOP: " : "";
-      const statusSuffix = det.is_stationary ? "" : " (Mendekati Gerbang)";
-      const labelText = det.latency_ms ? `${statusPrefix}${baseLabel}${statusSuffix} • ${det.latency_ms}ms` : `${statusPrefix}${baseLabel}${statusSuffix}`;
+      const labelText = det.latency_ms ? `${baseLabel} • ${det.latency_ms}ms` : baseLabel;
       boxVeh.querySelector('.det-label').textContent = labelText;
     } else if (boxVeh){
       boxVeh.style.display = 'none';
